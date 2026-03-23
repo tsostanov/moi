@@ -423,11 +423,27 @@ class App:
         )
         self.remove_light_button.pack(side="left", padx=(8, 0))
 
-        self.lights_container = ttk.Frame(wrapper)
-        self.lights_container.grid(row=1, column=0, columnspan=2, sticky="ew")
+        lights_viewport = ttk.Frame(wrapper)
+        lights_viewport.grid(row=1, column=0, columnspan=2, sticky="ew")
+        lights_viewport.columnconfigure(0, weight=1)
+        lights_viewport.rowconfigure(0, weight=1)
+
+        self.lights_canvas = tk.Canvas(lights_viewport, height=220, highlightthickness=0, borderwidth=0)
+        self.lights_canvas.grid(row=0, column=0, sticky="ew")
+
+        lights_scrollbar = ttk.Scrollbar(lights_viewport, orient="vertical", command=self.lights_canvas.yview)
+        lights_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.lights_canvas.configure(yscrollcommand=lights_scrollbar.set)
+
+        self.lights_container = ttk.Frame(self.lights_canvas)
+        self.lights_canvas_window = self.lights_canvas.create_window((0, 0), window=self.lights_container, anchor="nw")
+        self.lights_container.bind("<Configure>", self._update_lights_scrollregion)
+        self.lights_canvas.bind("<Configure>", self._resize_lights_canvas_window)
+        self.lights_canvas.bind("<Enter>", self._bind_lights_mousewheel)
+        self.lights_canvas.bind("<Leave>", self._unbind_lights_mousewheel)
         self.light_inputs: list[LightInput] = []
 
-        for position_defaults, axis_defaults, intensity_defaults in self.DEFAULT_LIGHTS[:2]:
+        for position_defaults, axis_defaults, intensity_defaults in self.DEFAULT_LIGHTS:
             self._add_light_input(position_defaults, axis_defaults, intensity_defaults)
 
         self._update_light_controls()
@@ -469,24 +485,43 @@ class App:
         self._update_light_controls()
 
     def _relayout_light_inputs(self) -> None:
-        for column in range(2):
-            self.lights_container.columnconfigure(column, weight=1)
+        self.lights_container.columnconfigure(0, weight=1)
+        self.lights_container.columnconfigure(1, weight=0)
 
         for index, light_input in enumerate(self.light_inputs):
             light_input.set_title(f"L{index + 1}")
             light_input.grid(
-                row=index // 2,
-                column=index % 2,
+                row=index,
+                column=0,
                 padx=5,
                 pady=5,
-                sticky="nsew",
+                sticky="ew",
             )
+
+        self._update_lights_scrollregion()
 
     def _update_light_controls(self) -> None:
         if self.light_inputs:
             self.remove_light_button.state(["!disabled"])
         else:
             self.remove_light_button.state(["disabled"])
+
+    def _update_lights_scrollregion(self, _event: tk.Event | None = None) -> None:
+        self.lights_canvas.configure(scrollregion=self.lights_canvas.bbox("all"))
+
+    def _resize_lights_canvas_window(self, event: tk.Event) -> None:
+        self.lights_canvas.itemconfigure(self.lights_canvas_window, width=event.width)
+
+    def _bind_lights_mousewheel(self, _event: tk.Event) -> None:
+        self.lights_canvas.bind_all("<MouseWheel>", self._on_lights_mousewheel)
+
+    def _unbind_lights_mousewheel(self, _event: tk.Event) -> None:
+        self.lights_canvas.unbind_all("<MouseWheel>")
+
+    def _on_lights_mousewheel(self, event: tk.Event) -> None:
+        delta = getattr(event, "delta", 0)
+        if delta:
+            self.lights_canvas.yview_scroll(-int(delta / 120), "units")
 
     def _build_points_section(self, master: ttk.Frame) -> None:
         frame = ttk.LabelFrame(master, text="Точки для расчета", padding=10)
