@@ -165,24 +165,6 @@ def compute_normal(p0: Vec3, p1: Vec3, p2: Vec3) -> Vec3:
     return edge1.cross(edge2).normalize()
 
 
-def orient_normal_towards_scene(
-    p0: Vec3,
-    p1: Vec3,
-    p2: Vec3,
-    normal: Vec3,
-    observer: Vec3,
-    lights: list[Light],
-) -> tuple[Vec3, bool]:
-    centroid = (p0 + p1 + p2) * (1.0 / 3.0)
-    alignment_score = normal.dot(observer - centroid)
-    for light in lights:
-        alignment_score += normal.dot(light.position - centroid)
-
-    if alignment_score < 0.0:
-        return normal * -1.0, True
-    return normal, False
-
-
 def choose_projection(normal: Vec3) -> tuple[str, Callable[[Vec3], tuple[float, float]]]:
     axis_weights = {
         "XY": abs(normal.z),
@@ -209,6 +191,14 @@ def compute_point_lighting(
     except ValueError as error:
         raise ValueError("Точка наблюдателя совпадает с точкой на поверхности.") from error
 
+    if normal.dot(view_dir) <= 0.0:
+        return PointCalculation(
+            point=point,
+            illuminance_total=Vec3(0.0, 0.0, 0.0),
+            brightness_total=Vec3(0.0, 0.0, 0.0),
+            contributions=[],
+        )
+
     illuminance_total = Vec3(0.0, 0.0, 0.0)
     brightness_total = Vec3(0.0, 0.0, 0.0)
     contributions: list[LightContribution] = []
@@ -222,20 +212,15 @@ def compute_point_lighting(
         light_dir = to_light * (1.0 / distance)
         emission_dir = (point - light.position).normalize()
         axis_dir = light.axis.normalize()
+        observer_axis_cos = clamp01(axis_dir.dot(view_dir * -1.0))
 
         theta_cos = clamp01(axis_dir.dot(emission_dir))
-        alpha_cos = clamp01(normal.dot(light_dir))
+        alpha_cos = observer_axis_cos
 
         intensity_rgb = light.intensity_rgb * theta_cos
         illuminance_rgb = intensity_rgb * (alpha_cos / (distance * distance))
 
-        half_vector_raw = light_dir + view_dir
-        if half_vector_raw.length() < EPSILON:
-            half_vector = normal
-        else:
-            half_vector = half_vector_raw.normalize()
-
-        specular = max(0.0, normal.dot(half_vector)) ** material.shininess
+        specular = observer_axis_cos ** material.shininess
         brdf = material.kd + material.ks * specular
         brightness_rgb = component_mul(illuminance_rgb, material.color_rgb) * brdf
 
@@ -609,6 +594,7 @@ class App:
         p1: Vec3,
         p2: Vec3,
         normal: Vec3,
+        triangle_visible: bool,
         preview_points: list[PreviewPoint],
     ) -> None:
         projection_name, projector = choose_projection(normal)
@@ -621,7 +607,11 @@ class App:
                 preview_point.brightness_rgb.z,
             )
 
-        if max_component < EPSILON:
+        if not triangle_visible:
+            self.preview_info_var.set(
+                f"Проекция на плоскость {projection_name}. Наблюдатель видит тыльную сторону, поэтому яркость обнулена."
+            )
+        elif max_component < EPSILON:
             self.preview_info_var.set(
                 f"Проекция на плоскость {projection_name}. Все расчетные точки имеют нулевую яркость."
             )
@@ -678,8 +668,8 @@ class App:
         triangle_coords = [*to_canvas(p0), *to_canvas(p1), *to_canvas(p2)]
         self.preview_canvas.create_polygon(
             triangle_coords,
-            fill="#dbe9ff",
-            outline="#1c427e",
+            fill="#eef1f4" if not triangle_visible else "#dbe9ff",
+            outline="#7d8894" if not triangle_visible else "#1c427e",
             width=2,
         )
 
@@ -748,6 +738,89 @@ class App:
             font=("Segoe UI", 9),
         )
 
+    def _build_console_table(
+        self,
+        point_rows: list[tuple[int, float, float, Vec3, PointCalculation]],
+        value_getter: Callable[[PointCalculation], Vec3],
+    ) -> str:
+        x_values = list(dict.fromkeys(x_local for _, x_local, _, _, _ in point_rows))
+        y_values = list(dict.fromkeys(y_local for _, _, y_local, _, _ in point_rows))
+
+        column_count = max(5, len(x_values))
+        row_count = max(5, len(y_values))
+        padded_x_values = x_values + [None] * (column_count - len(x_values))
+        padded_y_values = y_values + [None] * (row_count - len(y_values))
+        lookup = {(x_local, y_local): result for _, x_local, y_local, _, result in point_rows}
+
+        lines = [
+            "x",
+            "y\t" + "\t".join(f"{x_value:.4f}" if x_value is not None else "" for x_value in padded_x_values),
+        ]
+        for y_value in padded_y_values:
+            row_label = f"{y_value:.4f}" if y_value is not None else ""
+            cells: list[str] = []
+            for x_value in padded_x_values:
+                if x_value is None or y_value is None:
+                    cells.append("-")
+                    continue
+                result = lookup.get((x_value, y_value))
+                cells.append(format_vec(value_getter(result)) if result is not None else "-")
+            lines.append(row_label + "\t" + "\t".join(cells))
+        return "\n".join(lines)
+
+    def _build_console_report(
+        self,
+        lights: list[Light],
+        p0: Vec3,
+        p1: Vec3,
+        p2: Vec3,
+        observer: Vec3,
+        material: Material,
+        point_rows: list[tuple[int, float, float, Vec3, PointCalculation]],
+    ) -> str:
+        light_intensities = ", ".join(
+            f"I_{index:02d}(RGB) = {format_vec(light.intensity_rgb)}"
+            for index, light in enumerate(lights, start=1)
+        )
+        light_axes = ", ".join(
+            f"d_{index} = {format_vec(light.axis)}"
+            for index, light in enumerate(lights, start=1)
+        )
+        light_positions = ", ".join(
+            f"P_L{index} = {format_vec(light.position)}"
+            for index, light in enumerate(lights, start=1)
+        )
+        local_points = "; ".join(
+            f"(x_{index}, y_{index}) = ({x_local:.4f}, {y_local:.4f})"
+            for index, (_, x_local, y_local, _, _) in enumerate(point_rows, start=1)
+        )
+
+        lines = [
+            "Пример входных данных и результаты",
+            f"1. {light_intensities if light_intensities else '-'}",
+            f"2. {light_axes if light_axes else '-'}",
+            f"3. {light_positions if light_positions else '-'}",
+            f"4. P_0 = {format_vec(p0)}",
+            f"5. P_1 = {format_vec(p1)}",
+            f"6. P_2 = {format_vec(p2)}",
+            f"7. {local_points if local_points else '-'}",
+            f"8. V = {format_vec(observer)}",
+            f"9. K(RGB) = {format_vec(material.color_rgb)}",
+            f"10. k_d = {material.kd:.4f}",
+            f"11. k_s = {material.ks:.4f}",
+            f"12. n = {material.shininess:.4f}",
+            "",
+            "Вычисленные значения освещенности E для точек, заданных локальными координатами:",
+            self._build_console_table(point_rows, lambda result: result.illuminance_total),
+            "",
+            "Вычисленные значения освещенности E для тех же точек, заданных глобальными координатами:",
+            self._build_console_table(point_rows, lambda result: result.illuminance_total),
+            "",
+            "Вычисленные значения яркостей L для тех же точек на плоскости с заданными условиями наблюдения:",
+            self._build_console_table(point_rows, lambda result: result.brightness_total),
+        ]
+        return "\n".join(lines)
+
     def calculate(self) -> None:
         try:
             p0 = self.p0_entry.get_vec3("P0")
@@ -767,14 +840,9 @@ class App:
                 raise ValueError("Нужно задать хотя бы один источник света.")
 
             geometric_normal = compute_normal(p0, p1, p2)
-            normal, normal_was_flipped = orient_normal_towards_scene(
-                p0,
-                p1,
-                p2,
-                geometric_normal,
-                observer,
-                lights,
-            )
+            normal = geometric_normal
+            triangle_centroid = (p0 + p1 + p2) * (1.0 / 3.0)
+            triangle_visible = normal.dot(observer - triangle_centroid) > 0.0
             local_points = parse_lines(self.local_points_text.get("1.0", tk.END), 2, "Локальные точки")
 
             output_lines = [
@@ -789,7 +857,7 @@ class App:
                 "",
             ]
 
-            if normal_was_flipped:
+            if False:
                 output_lines.extend(
                     [
                         "Нормаль была автоматически развернута к наблюдателю и источникам света.",
@@ -832,14 +900,25 @@ class App:
             if not point_rows:
                 output_lines.append("Нет точек для расчета.")
 
+            console_report = self._build_console_report(
+                lights,
+                p0,
+                p1,
+                p2,
+                observer,
+                material,
+                point_rows,
+            )
             self.results_text.delete("1.0", tk.END)
             self.results_text.insert("1.0", "\n".join(output_lines).rstrip() + "\n")
+            print(console_report, flush=True)
             self._set_generated_global_points([global_point for _, _, _, global_point, _ in point_rows])
             self._draw_preview(
                 p0,
                 p1,
                 p2,
                 normal,
+                triangle_visible,
                 [
                     PreviewPoint(index=idx, point=global_point, brightness_rgb=result.brightness_total)
                     for idx, _, _, global_point, result in point_rows
@@ -860,7 +939,7 @@ class App:
                 "   "
                 f"L{contribution.index}: R={contribution.distance:.4f}, "
                 f"cos(theta)={contribution.theta_cos:.4f}, "
-                f"cos(alpha)={contribution.alpha_cos:.4f}, "
+                f"align(view,axis)={contribution.alpha_cos:.4f}, "
                 f"BRDF={contribution.brdf:.4f}"
             )
             lines.append(f"      E = {format_vec(contribution.illuminance_rgb)}")
