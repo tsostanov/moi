@@ -85,6 +85,13 @@ class PointCalculation:
     contributions: list[LightContribution]
 
 
+@dataclass(frozen=True)
+class PreviewPoint:
+    index: int
+    point: Vec3
+    brightness_rgb: Vec3
+
+
 def clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
@@ -95,6 +102,21 @@ def component_mul(a: Vec3, b: Vec3) -> Vec3:
 
 def format_vec(vector: Vec3) -> str:
     return f"({vector.x:.4f}, {vector.y:.4f}, {vector.z:.4f})"
+
+
+def format_short_vec(vector: Vec3) -> str:
+    return f"({vector.x:.3g}, {vector.y:.3g}, {vector.z:.3g})"
+
+
+def format_legend_vec(vector: Vec3) -> str:
+    return f"{vector.x:.4f}/{vector.y:.4f}/{vector.z:.4f}"
+
+
+def vec_to_hex(vector: Vec3) -> str:
+    red = int(round(clamp01(vector.x) * 255))
+    green = int(round(clamp01(vector.y) * 255))
+    blue = int(round(clamp01(vector.z) * 255))
+    return f"#{red:02x}{green:02x}{blue:02x}"
 
 
 def parse_scalar(text: str, field_name: str) -> float:
@@ -141,6 +163,24 @@ def compute_normal(p0: Vec3, p1: Vec3, p2: Vec3) -> Vec3:
     edge1 = p1 - p0
     edge2 = p2 - p0
     return edge1.cross(edge2).normalize()
+
+
+def orient_normal_towards_scene(
+    p0: Vec3,
+    p1: Vec3,
+    p2: Vec3,
+    normal: Vec3,
+    observer: Vec3,
+    lights: list[Light],
+) -> tuple[Vec3, bool]:
+    centroid = (p0 + p1 + p2) * (1.0 / 3.0)
+    alignment_score = normal.dot(observer - centroid)
+    for light in lights:
+        alignment_score += normal.dot(light.position - centroid)
+
+    if alignment_score < 0.0:
+        return normal * -1.0, True
+    return normal, False
 
 
 def choose_projection(normal: Vec3) -> tuple[str, Callable[[Vec3], tuple[float, float]]]:
@@ -273,8 +313,17 @@ class LightInput(ttk.LabelFrame):
         intensity_rgb = self.intensity.get_vec3(f"{self['text']} интенсивность")
         return Light(position=position, axis=axis, intensity_rgb=intensity_rgb)
 
+    def set_title(self, title: str) -> None:
+        self.configure(text=title)
+
 
 class App:
+    DEFAULT_LIGHTS = [
+        (("-2", "6", "5"), ("0.5", "-1", "-1"), ("1.0", "0.9", "0.8")),
+        (("4", "4", "6"), ("-0.3", "-0.8", "-1"), ("0.6", "0.8", "1.0")),
+        (("0", "7", "4"), ("0", "-1", "-0.5"), ("0.8", "0.7", "0.7")),
+    ]
+
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Расчет яркости точки на поверхности")
@@ -364,16 +413,80 @@ class App:
         wrapper = ttk.LabelFrame(master, text="Источники света", padding=10)
         wrapper.pack(fill="x", pady=(0, 10))
 
-        self.light_inputs = [
-            LightInput(wrapper, "L1", ("-2", "6", "5"), ("0.5", "-1", "-1"), ("1.0", "0.9", "0.8")),
-            LightInput(wrapper, "L2", ("4", "4", "6"), ("-0.3", "-0.8", "-1"), ("0.6", "0.8", "1.0")),
-        ]
+        toolbar = ttk.Frame(wrapper)
+        toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        ttk.Button(toolbar, text="Добавить источник", command=self._add_light_input).pack(side="left")
+        self.remove_light_button = ttk.Button(
+            toolbar,
+            text="Удалить последний",
+            command=self._remove_light_input,
+        )
+        self.remove_light_button.pack(side="left", padx=(8, 0))
 
-        for index, light_input in enumerate(self.light_inputs):
-            light_input.grid(row=index // 2, column=index % 2, padx=5, pady=5, sticky="nsew")
+        self.lights_container = ttk.Frame(wrapper)
+        self.lights_container.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.light_inputs: list[LightInput] = []
 
+        for position_defaults, axis_defaults, intensity_defaults in self.DEFAULT_LIGHTS[:2]:
+            self._add_light_input(position_defaults, axis_defaults, intensity_defaults)
+
+        self._update_light_controls()
         wrapper.columnconfigure(0, weight=1)
         wrapper.columnconfigure(1, weight=1)
+
+    def _add_light_input(
+        self,
+        position_defaults: tuple[str, str, str] | None = None,
+        axis_defaults: tuple[str, str, str] | None = None,
+        intensity_defaults: tuple[str, str, str] | None = None,
+    ) -> None:
+        light_index = len(self.light_inputs)
+        if position_defaults is None or axis_defaults is None or intensity_defaults is None:
+            if light_index < len(self.DEFAULT_LIGHTS):
+                position_defaults, axis_defaults, intensity_defaults = self.DEFAULT_LIGHTS[light_index]
+            else:
+                position_defaults = ("0", str(6 + light_index), str(4 + light_index))
+                axis_defaults = ("0", "-1", "-1")
+                intensity_defaults = ("1.0", "1.0", "1.0")
+
+        light_input = LightInput(
+            self.lights_container,
+            f"L{light_index + 1}",
+            position_defaults,
+            axis_defaults,
+            intensity_defaults,
+        )
+        self.light_inputs.append(light_input)
+        self._relayout_light_inputs()
+        self._update_light_controls()
+
+    def _remove_light_input(self) -> None:
+        if not self.light_inputs:
+            return
+        light_input = self.light_inputs.pop()
+        light_input.destroy()
+        self._relayout_light_inputs()
+        self._update_light_controls()
+
+    def _relayout_light_inputs(self) -> None:
+        for column in range(2):
+            self.lights_container.columnconfigure(column, weight=1)
+
+        for index, light_input in enumerate(self.light_inputs):
+            light_input.set_title(f"L{index + 1}")
+            light_input.grid(
+                row=index // 2,
+                column=index % 2,
+                padx=5,
+                pady=5,
+                sticky="nsew",
+            )
+
+    def _update_light_controls(self) -> None:
+        if self.light_inputs:
+            self.remove_light_button.state(["!disabled"])
+        else:
+            self.remove_light_button.state(["disabled"])
 
     def _build_points_section(self, master: ttk.Frame) -> None:
         frame = ttk.LabelFrame(master, text="Точки для расчета", padding=10)
@@ -399,12 +512,12 @@ class App:
         ttk.Button(frame, text="Очистить результаты", command=self.clear_results).pack(side="left", padx=(8, 0))
 
     def _build_preview(self, master: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(master, text="Схема", padding=10)
+        frame = ttk.LabelFrame(master, text="Карта яркости", padding=10)
         frame.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
 
-        self.preview_info_var = tk.StringVar(value="Схема треугольника появится после расчета.")
+        self.preview_info_var = tk.StringVar(value="После расчета здесь появится треугольник с яркостями в точках.")
         ttk.Label(frame, textvariable=self.preview_info_var).grid(row=0, column=0, sticky="w", pady=(0, 6))
 
         self.preview_canvas = tk.Canvas(
@@ -432,7 +545,7 @@ class App:
         self.generated_global_text.configure(state="normal")
         self.generated_global_text.delete("1.0", tk.END)
         self.generated_global_text.configure(state="disabled")
-        self.preview_info_var.set("Схема треугольника появится после расчета.")
+        self.preview_info_var.set("После расчета здесь появится треугольник с яркостями в точках.")
         self._draw_empty_preview()
 
     def _set_generated_global_points(self, points: list[Vec3]) -> None:
@@ -450,7 +563,7 @@ class App:
         self.preview_canvas.create_text(
             width / 2,
             height / 2,
-            text="После расчета здесь будет схема треугольника и точек",
+            text="После расчета здесь будет карта яркости для точек треугольника",
             fill="#506070",
             font=("Segoe UI", 12),
         )
@@ -461,21 +574,33 @@ class App:
         p1: Vec3,
         p2: Vec3,
         normal: Vec3,
-        lights: list[Light],
-        observer: Vec3,
-        local_points: list[tuple[float, float, Vec3]],
+        preview_points: list[PreviewPoint],
     ) -> None:
         projection_name, projector = choose_projection(normal)
-        self.preview_info_var.set(f"Проекция на плоскость {projection_name}. Отмечены расчетные точки на треугольнике.")
+        max_component = 0.0
+        for preview_point in preview_points:
+            max_component = max(
+                max_component,
+                preview_point.brightness_rgb.x,
+                preview_point.brightness_rgb.y,
+                preview_point.brightness_rgb.z,
+            )
+
+        if max_component < EPSILON:
+            self.preview_info_var.set(
+                f"Проекция на плоскость {projection_name}. Все расчетные точки имеют нулевую яркость."
+            )
+        else:
+            self.preview_info_var.set(
+                f"Проекция на плоскость {projection_name}. Цвет точки показывает L_total с нормировкой по максимуму {max_component:.4f}."
+            )
 
         projected_points: list[tuple[float, float]] = [
             projector(p0),
             projector(p1),
             projector(p2),
-            projector(observer),
         ]
-        projected_points.extend(projector(light.position) for light in lights)
-        projected_points.extend(projector(point) for _, _, point in local_points)
+        projected_points.extend(projector(preview_point.point) for preview_point in preview_points)
 
         xs = [point[0] for point in projected_points]
         ys = [point[1] for point in projected_points]
@@ -485,25 +610,42 @@ class App:
         width = int(self.preview_canvas.cget("width"))
         height = int(self.preview_canvas.cget("height"))
         margin = 40
+        legend_width = 240
+        plot_width = max(220, width - legend_width - 2 * margin)
+        plot_height = max(160, height - 2 * margin)
         range_x = max(max_x - min_x, 1.0)
         range_y = max(max_y - min_y, 1.0)
-        scale = min((width - 2 * margin) / range_x, (height - 2 * margin) / range_y)
+        scale = min(plot_width / range_x, plot_height / range_y)
+        plot_origin_x = margin
+        plot_origin_y = margin
+        scaled_width = range_x * scale
+        scaled_height = range_y * scale
+        x_offset = plot_origin_x + (plot_width - scaled_width) / 2
+        y_offset = plot_origin_y + (plot_height - scaled_height) / 2
 
         def to_canvas(point: Vec3) -> tuple[float, float]:
             px, py = projector(point)
-            canvas_x = margin + (px - min_x) * scale
-            canvas_y = height - margin - (py - min_y) * scale
+            canvas_x = x_offset + (px - min_x) * scale
+            canvas_y = plot_origin_y + scaled_height - (py - min_y) * scale + (plot_height - scaled_height) / 2
             return canvas_x, canvas_y
 
         self.preview_canvas.delete("all")
 
+        self.preview_canvas.create_rectangle(
+            plot_origin_x - 12,
+            plot_origin_y - 12,
+            plot_origin_x + plot_width + 12,
+            plot_origin_y + plot_height + 12,
+            outline="#d5e0ea",
+            width=1,
+        )
+
         triangle_coords = [*to_canvas(p0), *to_canvas(p1), *to_canvas(p2)]
         self.preview_canvas.create_polygon(
             triangle_coords,
-            fill="#4c7fd1",
+            fill="#dbe9ff",
             outline="#1c427e",
             width=2,
-            stipple="gray25",
         )
 
         for label, point in (("P0", p0), ("P1", p1), ("P2", p2)):
@@ -511,25 +653,62 @@ class App:
             self.preview_canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill="#0b1c32", outline="")
             self.preview_canvas.create_text(x + 18, y - 12, text=label, fill="#10233f", font=("Segoe UI", 10, "bold"))
 
-        for light_index, light in enumerate(lights, start=1):
-            x, y = to_canvas(light.position)
-            self.preview_canvas.create_oval(x - 7, y - 7, x + 7, y + 7, fill="#ffb347", outline="#9a5b00", width=2)
-            self.preview_canvas.create_text(x + 18, y - 12, text=f"L{light_index}", fill="#9a5b00", font=("Segoe UI", 10, "bold"))
+        for preview_point in preview_points:
+            x, y = to_canvas(preview_point.point)
+            if max_component < EPSILON:
+                point_color = "#9aa5b1"
+            else:
+                point_color = vec_to_hex(preview_point.brightness_rgb * (1.0 / max_component))
+            self.preview_canvas.create_oval(x - 7, y - 7, x + 7, y + 7, fill=point_color, outline="#243447", width=1)
+            self.preview_canvas.create_text(
+                x + 16,
+                y - 12,
+                text=f"T{preview_point.index}",
+                fill="#243447",
+                font=("Segoe UI", 9, "bold"),
+            )
 
-        ox, oy = to_canvas(observer)
-        self.preview_canvas.create_rectangle(ox - 7, oy - 7, ox + 7, oy + 7, fill="#53b36b", outline="#246235", width=2)
-        self.preview_canvas.create_text(ox + 20, oy - 12, text="V", fill="#246235", font=("Segoe UI", 10, "bold"))
+        legend_left = plot_origin_x + plot_width + 24
+        legend_top = 18
+        legend_text_width = max(120, width - legend_left - 18)
+        self.preview_canvas.create_text(
+            legend_left,
+            legend_top,
+            anchor="nw",
+            text="Яркость в точках",
+            fill="#243447",
+            font=("Segoe UI", 10, "bold"),
+        )
 
-        for index, (_, _, point) in enumerate(local_points, start=1):
-            x, y = to_canvas(point)
-            self.preview_canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill="#7b4dff", outline="#41258a")
-            self.preview_canvas.create_text(x + 14, y + 12, text=f"T{index}", fill="#41258a", font=("Segoe UI", 9))
+        for row_index, preview_point in enumerate(preview_points):
+            row_y = legend_top + 28 + row_index * 26
+            if max_component < EPSILON:
+                point_color = "#9aa5b1"
+            else:
+                point_color = vec_to_hex(preview_point.brightness_rgb * (1.0 / max_component))
+            self.preview_canvas.create_rectangle(
+                legend_left,
+                row_y,
+                legend_left + 14,
+                row_y + 14,
+                fill=point_color,
+                outline="#243447",
+            )
+            self.preview_canvas.create_text(
+                legend_left + 22,
+                row_y + 7,
+                anchor="w",
+                text=f"T{preview_point.index}: L={format_legend_vec(preview_point.brightness_rgb)}",
+                fill="#243447",
+                font=("Consolas", 8),
+                width=legend_text_width - 22,
+            )
 
         self.preview_canvas.create_text(
             14,
             height - 14,
             anchor="w",
-            text="Легенда: фиолетовые метки = точки расчета, полученные из локальных координат",
+            text="Цвет точки показывает относительную величину L_total; точные значения перечислены справа.",
             fill="#425466",
             font=("Segoe UI", 9),
         )
@@ -552,19 +731,36 @@ class App:
             if not lights:
                 raise ValueError("Нужно задать хотя бы один источник света.")
 
-            normal = compute_normal(p0, p1, p2)
+            geometric_normal = compute_normal(p0, p1, p2)
+            normal, normal_was_flipped = orient_normal_towards_scene(
+                p0,
+                p1,
+                p2,
+                geometric_normal,
+                observer,
+                lights,
+            )
             local_points = parse_lines(self.local_points_text.get("1.0", tk.END), 2, "Локальные точки")
 
             output_lines = [
                 "Расчет яркости точки на поверхности",
                 "",
-                f"Нормаль поверхности N = {format_vec(normal)}",
+                f"Геометрическая нормаль N0 = {format_vec(geometric_normal)}",
+                f"Рабочая нормаль N = {format_vec(normal)}",
                 f"Наблюдатель V = {format_vec(observer)}",
                 f"Цвет поверхности = {format_vec(material.color_rgb)}",
                 f"kd = {material.kd:.4f}, ks = {material.ks:.4f}, n = {material.shininess:.4f}",
                 "Диаграмма излучения принята в упрощенном виде: f(theta) = max(0, cos(theta)).",
                 "",
             ]
+
+            if normal_was_flipped:
+                output_lines.extend(
+                    [
+                        "Нормаль была автоматически развернута к наблюдателю и источникам света.",
+                        "",
+                    ]
+                )
 
             point_rows: list[tuple[int, float, float, Vec3, PointCalculation]] = []
             for idx, (x_local, y_local) in enumerate(local_points, start=1):
@@ -609,9 +805,10 @@ class App:
                 p1,
                 p2,
                 normal,
-                lights,
-                observer,
-                [(x_local, y_local, global_point) for _, x_local, y_local, global_point, _ in point_rows],
+                [
+                    PreviewPoint(index=idx, point=global_point, brightness_rgb=result.brightness_total)
+                    for idx, _, _, global_point, result in point_rows
+                ],
             )
         except ValueError as error:
             messagebox.showerror("Ошибка ввода", str(error))
