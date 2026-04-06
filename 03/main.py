@@ -51,7 +51,7 @@ class Vec3:
     def normalize(self) -> "Vec3":
         length = self.length()
         if length < EPSILON:
-            raise ValueError("Zero-length vector cannot be normalized.")
+            raise ValueError("Нельзя нормализовать нулевой вектор.")
         return self * (1.0 / length)
 
 
@@ -106,7 +106,7 @@ def build_count_table(bin_name: str, counts: list[int], expected: float) -> str:
             ]
         )
     return format_table(
-        [bin_name, "count", "expected", "diff", "diff %"],
+        [bin_name, "число", "ожид.", "разн.", "разн. %"],
         rows,
     )
 
@@ -186,7 +186,7 @@ def phi_bin_index(phi: float, bins: int) -> int:
 
 
 def build_metrics_table(rows: list[tuple[str, str]]) -> str:
-    return format_table(["metric", "value"], [[name, value] for name, value in rows], alignments="lr")
+    return format_table(["метрика", "значение"], [[name, value] for name, value in rows], alignments="lr")
 
 
 def triangle_parameters() -> tuple[Vec3, Vec3, Vec3]:
@@ -278,22 +278,22 @@ def create_triangle_plot() -> Path:
     for index, vertex in enumerate(vertices_uv, start=1):
         scatter_ax.scatter([vertex[0]], [vertex[1]], s=45, color="#d64545", zorder=3)
         scatter_ax.text(vertex[0], vertex[1], f"  V{index}", fontsize=10, va="bottom")
-    scatter_ax.set_title("Points inside triangle")
-    scatter_ax.set_xlabel("local u")
-    scatter_ax.set_ylabel("local v")
+    scatter_ax.set_title("Точки внутри треугольника")
+    scatter_ax.set_xlabel("локальная координата u")
+    scatter_ax.set_ylabel("локальная координата v")
     scatter_ax.set_aspect("equal", adjustable="box")
     style_axes(scatter_ax)
 
     expected = PLOT_SAMPLE_COUNT / 4.0
-    labels = ["R1", "R2", "R3", "R4"]
+    labels = ["О1", "О2", "О3", "О4"]
     bar_ax.bar(labels, region_counts, color="#4f9d69")
-    bar_ax.axhline(expected, color="#8b1e3f", linestyle="--", linewidth=1.5, label=f"expected = {expected:.0f}")
-    bar_ax.set_title("Equal-area subtriangles")
-    bar_ax.set_ylabel("count")
+    bar_ax.axhline(expected, color="#8b1e3f", linestyle="--", linewidth=1.5, label=f"ожид. = {expected:.0f}")
+    bar_ax.set_title("Равновеликие подтреугольники")
+    bar_ax.set_ylabel("число точек")
     bar_ax.legend()
     style_axes(bar_ax)
 
-    fig.suptitle(f"Triangle sampling ({PLOT_SAMPLE_COUNT} plotted points)")
+    fig.suptitle(f"Распределение в треугольнике ({PLOT_SAMPLE_COUNT} точек)")
     return save_figure(fig, "triangle_distribution.png")
 
 
@@ -320,23 +320,23 @@ def create_disk_plot() -> Path:
     scatter_ax.scatter(xs, ys, s=1, alpha=0.35, color="#157a6e", rasterized=True)
     circle = plt.Circle((0.0, 0.0), radius, fill=False, linewidth=2.0, color="#102a43")
     scatter_ax.add_patch(circle)
-    scatter_ax.set_title("Points inside disk")
-    scatter_ax.set_xlabel("tangent coordinate")
-    scatter_ax.set_ylabel("bitangent coordinate")
+    scatter_ax.set_title("Точки внутри круга")
+    scatter_ax.set_xlabel("координата вдоль касательной")
+    scatter_ax.set_ylabel("координата вдоль бинормали")
     scatter_ax.set_aspect("equal", adjustable="box")
     scatter_ax.set_xlim(-radius * 1.08, radius * 1.08)
     scatter_ax.set_ylim(-radius * 1.08, radius * 1.08)
     style_axes(scatter_ax)
 
     hist_ax.hist(area_values, bins=20, range=(0.0, 1.0), density=True, color="#f4b942", edgecolor="#6b4f00")
-    hist_ax.axhline(1.0, color="#8b1e3f", linestyle="--", linewidth=1.5, label="uniform density")
-    hist_ax.set_title("u = (r / Rc)^2 distribution")
+    hist_ax.axhline(1.0, color="#8b1e3f", linestyle="--", linewidth=1.5, label="равномерная плотность")
+    hist_ax.set_title("Распределение u = (r / Rc)^2")
     hist_ax.set_xlabel("u")
-    hist_ax.set_ylabel("density")
+    hist_ax.set_ylabel("плотность")
     hist_ax.legend()
     style_axes(hist_ax)
 
-    fig.suptitle(f"Disk sampling ({PLOT_SAMPLE_COUNT} plotted points)")
+    fig.suptitle(f"Распределение в круге ({PLOT_SAMPLE_COUNT} точек)")
     return save_figure(fig, "disk_distribution.png")
 
 
@@ -364,17 +364,17 @@ def create_uniform_sphere_plot() -> Path:
         alpha=0.45,
         rasterized=True,
     )
-    configure_3d_axes(scatter_ax, "Uniform directions on sphere")
+    configure_3d_axes(scatter_ax, "Равномерные направления на сфере")
 
     hist_ax.hist(z_values, bins=24, range=(-1.0, 1.0), density=True, color="#3b82b0", edgecolor="#16324f")
-    hist_ax.axhline(0.5, color="#8b1e3f", linestyle="--", linewidth=1.5, label="theory: p(z)=1/2")
-    hist_ax.set_title("Distribution of z = cos(theta)")
+    hist_ax.axhline(0.5, color="#8b1e3f", linestyle="--", linewidth=1.5, label="теория: p(z)=1/2")
+    hist_ax.set_title("Распределение z = cos(theta)")
     hist_ax.set_xlabel("z")
-    hist_ax.set_ylabel("density")
+    hist_ax.set_ylabel("плотность")
     hist_ax.legend()
     style_axes(hist_ax)
 
-    fig.suptitle(f"Uniform sphere sampling ({PLOT_SAMPLE_COUNT} plotted directions)")
+    fig.suptitle(f"Равномерное распределение на сфере ({PLOT_SAMPLE_COUNT} направлений)")
     return save_figure(fig, "uniform_sphere_distribution.png")
 
 
@@ -405,19 +405,19 @@ def create_cosine_plot() -> Path:
         rasterized=True,
     )
     scatter_ax.quiver(0.0, 0.0, 0.0, normal.x, normal.y, normal.z, length=1.1, color="#111111", linewidth=2.0)
-    configure_3d_axes(scatter_ax, "Cosine-weighted hemisphere")
+    configure_3d_axes(scatter_ax, "Косинусное распределение на полусфере")
     scatter_ax.set_zlim(0.0, 1.05)
 
     hist_ax.hist(cosines, bins=24, range=(0.0, 1.0), density=True, color="#f08c2e", edgecolor="#6b3a00")
     xs = [index / 200.0 for index in range(201)]
-    hist_ax.plot(xs, [2.0 * x for x in xs], color="#8b1e3f", linewidth=2.0, label="theory: p(mu)=2mu")
-    hist_ax.set_title("Distribution of mu = cos(theta)")
+    hist_ax.plot(xs, [2.0 * x for x in xs], color="#8b1e3f", linewidth=2.0, label="теория: p(mu)=2mu")
+    hist_ax.set_title("Распределение mu = cos(theta)")
     hist_ax.set_xlabel("mu")
-    hist_ax.set_ylabel("density")
+    hist_ax.set_ylabel("плотность")
     hist_ax.legend()
     style_axes(hist_ax)
 
-    fig.suptitle(f"Cosine hemisphere sampling ({PLOT_SAMPLE_COUNT} plotted directions)")
+    fig.suptitle(f"Косинусное распределение на полусфере ({PLOT_SAMPLE_COUNT} направлений)")
     return save_figure(fig, "cosine_distribution.png")
 
 
@@ -467,28 +467,28 @@ def analyze_triangle() -> str:
     expected_subtriangle = SAMPLE_COUNT / 4.0
 
     lines = [
-        "1. Uniform points inside triangle",
+        "1. Равномерное распределение точек внутри треугольника",
         f"V1 = {format_vec(v1)}, V2 = {format_vec(v2)}, V3 = {format_vec(v3)}",
-        "sampling map: u1,u2 ~ U[0,1], s = sqrt(u1),",
+        "формирование: u1,u2 ~ U[0,1], s = sqrt(u1),",
         "b1 = 1 - s, b2 = s(1-u2), b3 = s*u2, P = b1*V1 + b2*V2 + b3*V3",
-        "proof idea: b1,b2,b3 >= 0 and b1+b2+b3 = 1 => every point lies inside the triangle; the Jacobian is constant over area.",
+        "идея доказательства: b1,b2,b3 >= 0 и b1+b2+b3 = 1, значит все точки лежат внутри треугольника; якобиан преобразования постоянен по площади.",
         build_metrics_table(
             [
-                ("generated points", str(SAMPLE_COUNT)),
-                ("invalid points", str(invalid_count)),
-                ("inside check passed", "yes" if invalid_count == 0 else "no"),
+                ("число сгенерированных точек", str(SAMPLE_COUNT)),
+                ("число неверных точек", str(invalid_count)),
+                ("проверка принадлежности", "пройдена" if invalid_count == 0 else "не пройдена"),
                 ("max |b1+b2+b3-1|", f"{max_bary_sum_error:.12f}"),
-                ("mean barycentric", f"({sum_b1 / SAMPLE_COUNT:.6f}, {sum_b2 / SAMPLE_COUNT:.6f}, {sum_b3 / SAMPLE_COUNT:.6f})"),
-                ("theoretical centroid", format_vec(centroid)),
-                ("sample centroid", format_vec(sample_centroid)),
-                ("centroid error", f"{centroid_error:.6f}"),
-                ("subtriangle chi^2", f"{chi_square_stat(region_counts, expected_subtriangle):.6f}"),
-                ("subtriangle max diff %", f"{max_relative_deviation_percent(region_counts, expected_subtriangle):.3f}%"),
-                ("subtriangle rms diff %", f"{rms_relative_deviation_percent(region_counts, expected_subtriangle):.3f}%"),
+                ("средние барицентрические", f"({sum_b1 / SAMPLE_COUNT:.6f}, {sum_b2 / SAMPLE_COUNT:.6f}, {sum_b3 / SAMPLE_COUNT:.6f})"),
+                ("теоретический центр масс", format_vec(centroid)),
+                ("выборочный центр масс", format_vec(sample_centroid)),
+                ("ошибка центра масс", f"{centroid_error:.6f}"),
+                ("chi^2 по подтреугольникам", f"{chi_square_stat(region_counts, expected_subtriangle):.6f}"),
+                ("макс. отклонение", f"{max_relative_deviation_percent(region_counts, expected_subtriangle):.3f}%"),
+                ("с.к.о. отклонение", f"{rms_relative_deviation_percent(region_counts, expected_subtriangle):.3f}%"),
             ]
         ),
-        "Equal-area subtriangles: expected count = N / 4",
-        build_count_table("subtriangle", region_counts, expected_subtriangle),
+        "Равновеликие подтреугольники: ожидаемое число = N / 4",
+        build_count_table("подтр.", region_counts, expected_subtriangle),
         "",
     ]
     return "\n".join(lines)
@@ -533,31 +533,31 @@ def analyze_disk() -> str:
     expected_sector = SAMPLE_COUNT / len(sector_counts)
 
     lines = [
-        "2. Uniform points inside disk",
+        "2. Равномерное распределение точек внутри круга",
         f"C = {format_vec(center)}, N = {format_vec(n)}, Rc = {radius:.6f}",
-        "sampling map: u1,u2 ~ U[0,1], r = Rc*sqrt(u1), phi = 2*pi*u2,",
-        "P = C + T*(r*cos(phi)) + B*(r*sin(phi)) in an orthonormal basis (T,B,N)",
-        "proof idea: u1 = r^2 / Rc^2 is uniform, so equal-area rings must contain the same number of samples.",
+        "формирование: u1,u2 ~ U[0,1], r = Rc*sqrt(u1), phi = 2*pi*u2,",
+        "P = C + T*(r*cos(phi)) + B*(r*sin(phi)) в ортонормированном базисе (T,B,N)",
+        "идея доказательства: u1 = r^2 / Rc^2 распределена равномерно, поэтому равновеликие кольца должны содержать одинаковое число точек.",
         build_metrics_table(
             [
-                ("generated points", str(SAMPLE_COUNT)),
-                ("invalid points", str(invalid_count)),
-                ("inside check passed", "yes" if invalid_count == 0 else "no"),
-                ("max plane distance", f"{max_plane_distance:.12f}"),
-                ("max radius / Rc", f"{max_radius_ratio:.6f}"),
-                ("theoretical centroid", format_vec(center)),
-                ("sample centroid", format_vec(sample_centroid)),
-                ("centroid error", f"{centroid_error:.6f}"),
-                ("ring chi^2", f"{chi_square_stat(ring_counts, expected_ring):.6f}"),
-                ("ring max diff %", f"{max_relative_deviation_percent(ring_counts, expected_ring):.3f}%"),
-                ("sector chi^2", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
-                ("sector max diff %", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
+                ("число сгенерированных точек", str(SAMPLE_COUNT)),
+                ("число неверных точек", str(invalid_count)),
+                ("проверка принадлежности", "пройдена" if invalid_count == 0 else "не пройдена"),
+                ("макс. расстояние до плоскости", f"{max_plane_distance:.12f}"),
+                ("макс. r / Rc", f"{max_radius_ratio:.6f}"),
+                ("теоретический центр масс", format_vec(center)),
+                ("выборочный центр масс", format_vec(sample_centroid)),
+                ("ошибка центра масс", f"{centroid_error:.6f}"),
+                ("chi^2 по кольцам", f"{chi_square_stat(ring_counts, expected_ring):.6f}"),
+                ("макс. отклонение по кольцам", f"{max_relative_deviation_percent(ring_counts, expected_ring):.3f}%"),
+                ("chi^2 по секторам", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
+                ("макс. отклонение по секторам", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
             ]
         ),
-        "Equal-area rings: expected count = N / 5",
-        build_count_table("ring", ring_counts, expected_ring),
-        "Azimuth sectors: expected count = N / 8",
-        build_count_table("sector", sector_counts, expected_sector),
+        "Равновеликие кольца: ожидаемое число = N / 5",
+        build_count_table("кольцо", ring_counts, expected_ring),
+        "Азимутальные секторы: ожидаемое число = N / 8",
+        build_count_table("сектор", sector_counts, expected_sector),
         "",
     ]
     return "\n".join(lines)
@@ -590,28 +590,28 @@ def analyze_uniform_sphere() -> str:
     expected_sector = SAMPLE_COUNT / len(sector_counts)
 
     lines = [
-        "3. Uniform directions on unit sphere",
-        "sampling map: u1,u2 ~ U[0,1], z = 1 - 2*u1, phi = 2*pi*u2,",
+        "3. Равномерное распределение направлений на единичной сфере",
+        "формирование: u1,u2 ~ U[0,1], z = 1 - 2*u1, phi = 2*pi*u2,",
         "w = (sqrt(1-z^2)*cos(phi), sqrt(1-z^2)*sin(phi), z)",
-        "proof idea: z = cos(theta) is uniform on [-1,1] and phi is uniform on [0,2*pi), which gives constant density over solid angle.",
+        "идея доказательства: z = cos(theta) равномерна на [-1,1], а phi равномерна на [0,2*pi), что даёт постоянную плотность по телесному углу.",
         build_metrics_table(
             [
-                ("generated directions", str(SAMPLE_COUNT)),
-                ("invalid directions", str(invalid_count)),
-                ("all normalized", "yes" if invalid_count == 0 else "no"),
+                ("число сгенерированных направлений", str(SAMPLE_COUNT)),
+                ("число неверных направлений", str(invalid_count)),
+                ("проверка нормировки", "пройдена" if invalid_count == 0 else "не пройдена"),
                 ("max ||w|-1|", f"{max_norm_error:.12f}"),
-                ("sample mean direction", format_vec(mean_dir)),
-                ("|mean direction|", f"{mean_dir.length():.6f}"),
-                ("z-bin chi^2", f"{chi_square_stat(z_counts, expected_z):.6f}"),
-                ("z-bin max diff %", f"{max_relative_deviation_percent(z_counts, expected_z):.3f}%"),
-                ("sector chi^2", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
-                ("sector max diff %", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
+                ("среднее направление выборки", format_vec(mean_dir)),
+                ("|среднее направление|", f"{mean_dir.length():.6f}"),
+                ("chi^2 по z-интервалам", f"{chi_square_stat(z_counts, expected_z):.6f}"),
+                ("макс. отклонение по z", f"{max_relative_deviation_percent(z_counts, expected_z):.3f}%"),
+                ("chi^2 по секторам", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
+                ("макс. отклонение по секторам", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
             ]
         ),
-        "z = cos(theta) bins on [-1, 1]: expected count = N / 10",
-        build_count_table("z-bin", z_counts, expected_z),
-        "Azimuth sectors: expected count = N / 8",
-        build_count_table("sector", sector_counts, expected_sector),
+        "Интервалы z = cos(theta) на [-1, 1]: ожидаемое число = N / 10",
+        build_count_table("z-инт.", z_counts, expected_z),
+        "Азимутальные секторы: ожидаемое число = N / 8",
+        build_count_table("сектор", sector_counts, expected_sector),
         "",
     ]
     return "\n".join(lines)
@@ -650,30 +650,30 @@ def analyze_cosine_directions() -> str:
     expected_sector = SAMPLE_COUNT / len(sector_counts)
 
     lines = [
-        "4. Cosine-weighted directions around N",
+        "4. Косинусное распределение направлений относительно N",
         f"N = {format_vec(normal)}",
-        "sampling map: sample the unit disk x = sqrt(u1)*cos(phi), y = sqrt(u1)*sin(phi),",
+        "формирование: сначала выбирается точка единичного круга x = sqrt(u1)*cos(phi), y = sqrt(u1)*sin(phi),",
         "z = sqrt(1-u1), w = T*x + B*y + N*z",
-        "proof idea: this produces pdf(w) = cos(theta)/pi on the hemisphere; equivalently, u = cos^2(theta) is uniform and phi is uniform.",
+        "идея доказательства: получается плотность pdf(w) = cos(theta)/pi на полусфере; эквивалентно, u = cos^2(theta) распределена равномерно, а phi равномерна.",
         build_metrics_table(
             [
-                ("generated directions", str(SAMPLE_COUNT)),
-                ("invalid directions", str(invalid_count)),
-                ("hemisphere check passed", "yes" if invalid_count == 0 else "no"),
+                ("число сгенерированных направлений", str(SAMPLE_COUNT)),
+                ("число неверных направлений", str(invalid_count)),
+                ("проверка полусферы", "пройдена" if invalid_count == 0 else "не пройдена"),
                 ("max ||w|-1|", f"{max_norm_error:.12f}"),
                 ("min dot(N, w)", f"{min_cosine:.6f}"),
-                ("sample mean cos(theta)", f"{mean_cosine:.6f}"),
-                ("theoretical mean cos(theta)", f"{2.0 / 3.0:.6f}"),
-                ("u-bin chi^2", f"{chi_square_stat(u_counts, expected_u):.6f}"),
-                ("u-bin max diff %", f"{max_relative_deviation_percent(u_counts, expected_u):.3f}%"),
-                ("sector chi^2", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
-                ("sector max diff %", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
+                ("выборочное среднее cos(theta)", f"{mean_cosine:.6f}"),
+                ("теоретическое среднее cos(theta)", f"{2.0 / 3.0:.6f}"),
+                ("chi^2 по u-интервалам", f"{chi_square_stat(u_counts, expected_u):.6f}"),
+                ("макс. отклонение по u", f"{max_relative_deviation_percent(u_counts, expected_u):.3f}%"),
+                ("chi^2 по секторам", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
+                ("макс. отклонение по секторам", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
             ]
         ),
-        "u = cos^2(theta) bins: expected count = N / 10",
-        build_count_table("u-bin", u_counts, expected_u),
-        "Azimuth sectors: expected count = N / 8",
-        build_count_table("sector", sector_counts, expected_sector),
+        "Интервалы u = cos^2(theta): ожидаемое число = N / 10",
+        build_count_table("u-инт.", u_counts, expected_u),
+        "Азимутальные секторы: ожидаемое число = N / 8",
+        build_count_table("сектор", sector_counts, expected_sector),
         "",
     ]
     return "\n".join(lines)
@@ -681,8 +681,8 @@ def analyze_cosine_directions() -> str:
 
 def build_report() -> str:
     sections = [
-        f"samples per task = {SAMPLE_COUNT}, base seed = {BASE_SEED}",
-        "validation = analytic sampling formulas + geometric constraints + equal-probability bin counts + chi^2 summary",
+        f"число выборок в каждом пункте = {SAMPLE_COUNT}, базовое зерно = {BASE_SEED}",
+        "проверка = аналитические формулы + геометрические ограничения + равновероятные интервалы + статистика chi^2",
         "",
         analyze_triangle(),
         analyze_disk(),
@@ -695,7 +695,7 @@ def build_report() -> str:
 def main() -> None:
     print(build_report())
     saved_plots = create_all_plots()
-    print("saved figures:")
+    print("сохранённые рисунки:")
     for path in saved_plots:
         print(f"- {path.name}")
 
