@@ -143,6 +143,16 @@ def sample_triangle_point(v1: Vec3, v2: Vec3, v3: Vec3, rng: random.Random) -> t
     return point, (b1, b2, b3)
 
 
+def classify_triangle_region(b1: float, b2: float, b3: float) -> int:
+    if b1 >= 0.5:
+        return 0
+    if b2 >= 0.5:
+        return 1
+    if b3 >= 0.5:
+        return 2
+    return 3
+
+
 def sample_disk_point(
     center: Vec3,
     basis: tuple[Vec3, Vec3, Vec3],
@@ -248,33 +258,50 @@ def create_triangle_plot() -> Path:
     axis_u, axis_v = build_triangle_plane_basis(v1, v2, v3)
     rng = random.Random(seed_from_key("triangle-plot"))
 
-    points_uv: list[tuple[float, float]] = []
+    region_points: list[list[tuple[float, float]]] = [[], [], [], []]
     region_counts = [0, 0, 0, 0]
     vertices_uv = [to_plane_coords(v1, axis_u, axis_v, vertex) for vertex in (v1, v2, v3)]
+    midpoint_12 = to_plane_coords(v1, axis_u, axis_v, (v1 + v2) * 0.5)
+    midpoint_13 = to_plane_coords(v1, axis_u, axis_v, (v1 + v3) * 0.5)
+    midpoint_23 = to_plane_coords(v1, axis_u, axis_v, (v2 + v3) * 0.5)
 
     for _ in range(PLOT_SAMPLE_COUNT):
         point, (b1, b2, b3) = sample_triangle_point(v1, v2, v3, rng)
-        points_uv.append(to_plane_coords(v1, axis_u, axis_v, point))
-
-        if b1 >= 0.5:
-            region_counts[0] += 1
-        elif b2 >= 0.5:
-            region_counts[1] += 1
-        elif b3 >= 0.5:
-            region_counts[2] += 1
-        else:
-            region_counts[3] += 1
+        region_index = classify_triangle_region(b1, b2, b3)
+        region_points[region_index].append(to_plane_coords(v1, axis_u, axis_v, point))
+        region_counts[region_index] += 1
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
     scatter_ax, bar_ax = axes
 
-    xs = [point[0] for point in points_uv]
-    ys = [point[1] for point in points_uv]
     polygon_x = [vertices_uv[0][0], vertices_uv[1][0], vertices_uv[2][0], vertices_uv[0][0]]
     polygon_y = [vertices_uv[0][1], vertices_uv[1][1], vertices_uv[2][1], vertices_uv[0][1]]
+    region_styles = [
+        ("Область V1: b1 >= 0.5", "#d64545"),
+        ("Область V2: b2 >= 0.5", "#2f855a"),
+        ("Область V3: b3 >= 0.5", "#2b6cb0"),
+        ("Центр: bi < 0.5", "#805ad5"),
+    ]
 
-    scatter_ax.scatter(xs, ys, s=1, alpha=0.35, color="#176087", rasterized=True)
+    for region_index, (label, color) in enumerate(region_styles):
+        xs = [point[0] for point in region_points[region_index]]
+        ys = [point[1] for point in region_points[region_index]]
+        scatter_ax.scatter(xs, ys, s=2, alpha=0.45, color=color, rasterized=True, label=label)
+
     scatter_ax.plot(polygon_x, polygon_y, color="#102a43", linewidth=2.0)
+    boundary_segments = [
+        (midpoint_12, midpoint_13),
+        (midpoint_12, midpoint_23),
+        (midpoint_13, midpoint_23),
+    ]
+    for start, end in boundary_segments:
+        scatter_ax.plot(
+            [start[0], end[0]],
+            [start[1], end[1]],
+            color="#2d3748",
+            linewidth=1.4,
+            linestyle="--",
+        )
     for index, vertex in enumerate(vertices_uv, start=1):
         scatter_ax.scatter([vertex[0]], [vertex[1]], s=45, color="#d64545", zorder=3)
         scatter_ax.text(vertex[0], vertex[1], f"  V{index}", fontsize=10, va="bottom")
@@ -282,6 +309,7 @@ def create_triangle_plot() -> Path:
     scatter_ax.set_xlabel("локальная координата u")
     scatter_ax.set_ylabel("локальная координата v")
     scatter_ax.set_aspect("equal", adjustable="box")
+    scatter_ax.legend(loc="upper right", fontsize=8, frameon=True)
     style_axes(scatter_ax)
 
     expected = PLOT_SAMPLE_COUNT / 4.0
@@ -320,6 +348,29 @@ def create_disk_plot() -> Path:
     scatter_ax.scatter(xs, ys, s=1, alpha=0.35, color="#157a6e", rasterized=True)
     circle = plt.Circle((0.0, 0.0), radius, fill=False, linewidth=2.0, color="#102a43")
     scatter_ax.add_patch(circle)
+    for ring_index in range(1, 5):
+        ring_radius = radius * math.sqrt(ring_index / 5.0)
+        scatter_ax.add_patch(
+            plt.Circle(
+                (0.0, 0.0),
+                ring_radius,
+                fill=False,
+                linewidth=1.1,
+                linestyle="--",
+                color="#4a5568",
+                alpha=0.9,
+            )
+        )
+    for sector_index in range(8):
+        phi = (2.0 * math.pi * sector_index) / 8.0
+        scatter_ax.plot(
+            [0.0, radius * math.cos(phi)],
+            [0.0, radius * math.sin(phi)],
+            color="#4a5568",
+            linewidth=1.1,
+            linestyle="--",
+            alpha=0.9,
+        )
     scatter_ax.set_title("Точки внутри круга")
     scatter_ax.set_xlabel("координата вдоль касательной")
     scatter_ax.set_ylabel("координата вдоль бинормали")
@@ -364,6 +415,30 @@ def create_uniform_sphere_plot() -> Path:
         alpha=0.45,
         rasterized=True,
     )
+    phi_samples = [2.0 * math.pi * index / 240.0 for index in range(241)]
+    for z_boundary_index in range(1, 10):
+        z_boundary = -1.0 + 2.0 * z_boundary_index / 10.0
+        radius_xy = math.sqrt(max(0.0, 1.0 - z_boundary * z_boundary))
+        scatter_ax.plot(
+            [radius_xy * math.cos(phi) for phi in phi_samples],
+            [radius_xy * math.sin(phi) for phi in phi_samples],
+            [z_boundary for _ in phi_samples],
+            color="#4a5568",
+            linewidth=0.9,
+            alpha=0.75,
+        )
+    z_samples = [-1.0 + 2.0 * index / 160.0 for index in range(161)]
+    for sector_index in range(8):
+        phi = 2.0 * math.pi * sector_index / 8.0
+        radial = [math.sqrt(max(0.0, 1.0 - z * z)) for z in z_samples]
+        scatter_ax.plot(
+            [radius_value * math.cos(phi) for radius_value in radial],
+            [radius_value * math.sin(phi) for radius_value in radial],
+            z_samples,
+            color="#4a5568",
+            linewidth=0.9,
+            alpha=0.75,
+        )
     configure_3d_axes(scatter_ax, "Равномерные направления на сфере")
 
     hist_ax.hist(z_values, bins=24, range=(-1.0, 1.0), density=True, color="#3b82b0", edgecolor="#16324f")
@@ -404,6 +479,30 @@ def create_cosine_plot() -> Path:
         alpha=0.45,
         rasterized=True,
     )
+    phi_samples = [2.0 * math.pi * index / 240.0 for index in range(241)]
+    for u_boundary_index in range(1, 10):
+        z_boundary = math.sqrt(u_boundary_index / 10.0)
+        radius_xy = math.sqrt(max(0.0, 1.0 - z_boundary * z_boundary))
+        scatter_ax.plot(
+            [radius_xy * math.cos(phi) for phi in phi_samples],
+            [radius_xy * math.sin(phi) for phi in phi_samples],
+            [z_boundary for _ in phi_samples],
+            color="#4a5568",
+            linewidth=0.9,
+            alpha=0.75,
+        )
+    z_samples = [index / 160.0 for index in range(161)]
+    for sector_index in range(8):
+        phi = 2.0 * math.pi * sector_index / 8.0
+        radial = [math.sqrt(max(0.0, 1.0 - z * z)) for z in z_samples]
+        scatter_ax.plot(
+            [radius_value * math.cos(phi) for radius_value in radial],
+            [radius_value * math.sin(phi) for radius_value in radial],
+            z_samples,
+            color="#4a5568",
+            linewidth=0.9,
+            alpha=0.75,
+        )
     scatter_ax.quiver(0.0, 0.0, 0.0, normal.x, normal.y, normal.z, length=1.1, color="#111111", linewidth=2.0)
     configure_3d_axes(scatter_ax, "Косинусное распределение на полусфере")
     scatter_ax.set_zlim(0.0, 1.05)
@@ -452,14 +551,7 @@ def analyze_triangle() -> str:
         if min(b1, b2, b3) < -EPSILON:
             invalid_count += 1
 
-        if b1 >= 0.5:
-            region_counts[0] += 1
-        elif b2 >= 0.5:
-            region_counts[1] += 1
-        elif b3 >= 0.5:
-            region_counts[2] += 1
-        else:
-            region_counts[3] += 1
+        region_counts[classify_triangle_region(b1, b2, b3)] += 1
 
     centroid = (v1 + v2 + v3) * (1.0 / 3.0)
     sample_centroid = sum_point * (1.0 / SAMPLE_COUNT)
