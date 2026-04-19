@@ -1,0 +1,19 @@
+Lab 4 path tracing run
+image: 500x500
+samples_per_pixel: 1
+max_depth: 1
+russian_roulette_from_depth: 3
+seed: 20260419
+triangles: 30
+emissive_triangles: 2
+normalization_white_point: 12
+elapsed_seconds: 126.795
+
+Materials:
+- white wall: diffuse=Vec3(x=0.72, y=0.72, z=0.72), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=0.0, y=0.0, z=0.0)
+- red wall: diffuse=Vec3(x=0.75, y=0.12, z=0.1), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=0.0, y=0.0, z=0.0)
+- green wall: diffuse=Vec3(x=0.12, y=0.62, z=0.18), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=0.0, y=0.0, z=0.0)
+- mixed object: diffuse=Vec3(x=0.45, y=0.36, z=0.22), specular=Vec3(x=0.25, y=0.25, z=0.25), emission=Vec3(x=0.0, y=0.0, z=0.0)
+- mirror object: diffuse=Vec3(x=0.04, y=0.04, z=0.04), specular=Vec3(x=0.86, y=0.86, z=0.86), emission=Vec3(x=0.0, y=0.0, z=0.0)
+- area light: diffuse=Vec3(x=0.0, y=0.0, z=0.0), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=12.0, y=10.4, z=8.6)
+- obj material: diffuse=Vec3(x=0.34, y=0.5, z=0.78), specular=Vec3(x=0.18, y=0.18, z=0.18), emission=Vec3(x=0.0, y=0.0, z=0.0)
