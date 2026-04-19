@@ -4,7 +4,9 @@ import argparse
 import concurrent.futures
 import math
 import random
+import struct
 import time
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -550,10 +552,7 @@ def render(scene: Scene, camera: Camera, args: argparse.Namespace) -> list[Vec3]
     return framebuffer
 
 
-def write_ppm(path: Path, pixels: list[Vec3], width: int, height: int, white_point: float | None) -> float:
-    max_value = max((pixel.max_component() for pixel in pixels), default=0.0)
-    normalization = white_point if white_point and white_point > 0.0 else max(max_value, 1e-12)
-
+def build_display_bytes(pixels: list[Vec3], normalization: float) -> bytearray:
     data = bytearray()
     for pixel in pixels:
         relative = pixel * (1.0 / normalization)
@@ -561,11 +560,44 @@ def write_ppm(path: Path, pixels: list[Vec3], width: int, height: int, white_poi
             clamped = max(0.0, min(1.0, value))
             corrected = clamped ** (1.0 / GAMMA)
             data.append(int(round(corrected * 255.0)))
+    return data
 
+
+def write_png(path: Path, rgb_data: bytearray, width: int, height: int) -> None:
+    def png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+        checksum = zlib.crc32(chunk_type)
+        checksum = zlib.crc32(data, checksum) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", checksum)
+
+    scanlines = bytearray()
+    row_size = width * 3
+    for y in range(height):
+        scanlines.append(0)
+        start = y * row_size
+        scanlines.extend(rgb_data[start : start + row_size])
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    with path.open("wb") as file:
+        file.write(b"\x89PNG\r\n\x1a\n")
+        file.write(png_chunk(b"IHDR", ihdr))
+        file.write(png_chunk(b"IDAT", zlib.compress(bytes(scanlines), level=6)))
+        file.write(png_chunk(b"IEND", b""))
+
+
+def write_ppm(path: Path, rgb_data: bytearray, width: int, height: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as file:
         file.write(f"P6\n{width} {height}\n255\n".encode("ascii"))
-        file.write(data)
+        file.write(rgb_data)
+
+
+def write_images(path: Path, pixels: list[Vec3], width: int, height: int, white_point: float | None) -> float:
+    max_value = max((pixel.max_component() for pixel in pixels), default=0.0)
+    normalization = white_point if white_point and white_point > 0.0 else max(max_value, 1e-12)
+    rgb_data = build_display_bytes(pixels, normalization)
+    write_ppm(path, rgb_data, width, height)
+    write_png(path.with_suffix(".png"), rgb_data, width, height)
     return normalization
 
 
@@ -595,12 +627,6 @@ def write_stats(path: Path, args: argparse.Namespace, scene: Scene, normalizatio
         ]
     )
     path.write_text(text, encoding="utf-8")
-
-
-def vec3_argument(values: list[str]) -> tuple[float, float, float]:
-    if len(values) != 3:
-        raise argparse.ArgumentTypeError("Expected exactly three numbers.")
-    return tuple(float(value.replace(",", ".")) for value in values)  # type: ignore[return-value]
 
 
 def parse_args() -> argparse.Namespace:
@@ -660,9 +686,10 @@ def main() -> None:
     )
     framebuffer = render(scene, camera, args)
     elapsed = time.monotonic() - start_time
-    normalization = write_ppm(args.output, framebuffer, args.width, args.height, args.white_point)
+    normalization = write_images(args.output, framebuffer, args.width, args.height, args.white_point)
     write_stats(args.output.with_suffix(".txt"), args, scene, normalization, elapsed)
     print(f"saved {args.output}")
+    print(f"saved {args.output.with_suffix('.png')}")
     print(f"saved {args.output.with_suffix('.txt')}")
 
 

@@ -7,7 +7,7 @@ seed: 20260419
 triangles: 30
 emissive_triangles: 2
 normalization_white_point: 12
-elapsed_seconds: 119.853
+elapsed_seconds: 94.457
 
 Materials:
 - white wall: diffuse=Vec3(x=0.72, y=0.72, z=0.72), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=0.0, y=0.0, z=0.0)
