@@ -524,11 +524,15 @@ def render(scene: Scene, camera: Camera, args: argparse.Namespace) -> list[Vec3]
                 next_progress_row += max(1, args.height // 10)
         return framebuffer
 
-    chunk_size = max(1, args.height // (args.workers * 8))
+    chunk_size = args.chunk_rows if args.chunk_rows > 0 else max(1, args.height // (args.workers * 8))
     tasks = [
         (y_start, min(args.height, y_start + chunk_size))
         for y_start in range(0, args.height, chunk_size)
     ]
+    print(
+        f"parallel render: workers={args.workers}, chunk_rows={chunk_size}, tasks={len(tasks)}",
+        flush=True,
+    )
     completed_rows = 0
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as executor:
@@ -648,6 +652,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--light-scale", type=float, default=1.0)
     parser.add_argument("--white-point", type=float, default=None, help="Manual normalization value. Default: image maximum.")
     parser.add_argument("--workers", type=int, default=1, help="Parallel worker processes. Use 1 for deterministic row order.")
+    parser.add_argument("--chunk-rows", type=int, default=16, help="Rows per parallel task. Larger values reduce worker overhead.")
     parser.add_argument("--obj", default="", help="Optional OBJ mesh inserted into the room.")
     parser.add_argument("--obj-scale", type=float, default=0.45)
     parser.add_argument("--obj-offset", nargs=3, type=float, default=(0.0, 0.0, 0.15), metavar=("X", "Y", "Z"))
@@ -666,6 +671,8 @@ def parse_args() -> argparse.Namespace:
         raise ValueError("Max depth must be positive.")
     if args.workers <= 0:
         raise ValueError("Workers must be positive.")
+    if args.chunk_rows < 0:
+        raise ValueError("Chunk rows must be non-negative.")
     return args
 
 
@@ -682,7 +689,8 @@ def main() -> None:
 
     print(
         f"scene={args.scene}, triangles={len(scene.triangles)}, lights={len(scene.light_ids)}, "
-        f"resolution={args.width}x{args.height}, spp={args.samples}"
+        f"resolution={args.width}x{args.height}, spp={args.samples}",
+        flush=True,
     )
     framebuffer = render(scene, camera, args)
     elapsed = time.monotonic() - start_time
