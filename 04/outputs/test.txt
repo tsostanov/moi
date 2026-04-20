@@ -6,8 +6,10 @@ russian_roulette_from_depth: 3
 seed: 20260419
 triangles: 36
 emissive_triangles: 2
+bvh_nodes: 23
+native_intersector: python_bvh
 normalization_white_point: 12
-elapsed_seconds: 78.452
+elapsed_seconds: 50.269
 
 Materials:
 - white wall: diffuse=Vec3(x=0.72, y=0.72, z=0.72), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=0.0, y=0.0, z=0.0)

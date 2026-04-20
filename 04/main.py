@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import ctypes
 import math
 import random
 import struct
@@ -13,9 +14,10 @@ from pathlib import Path
 
 EPSILON = 1e-6
 GAMMA = 2.2
+NATIVE_FLAT_TRIANGLE_LIMIT = 512
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Vec3:
     x: float
     y: float
@@ -75,13 +77,13 @@ BLACK = Vec3(0.0, 0.0, 0.0)
 ONE = Vec3(1.0, 1.0, 1.0)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Ray:
     origin: Vec3
     direction: Vec3
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Material:
     name: str
     diffuse: Vec3
@@ -101,21 +103,97 @@ class Material:
                 )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
+class AABB:
+    minimum: Vec3
+    maximum: Vec3
+
+    @classmethod
+    def empty(cls) -> "AABB":
+        return cls(
+            Vec3(float("inf"), float("inf"), float("inf")),
+            Vec3(float("-inf"), float("-inf"), float("-inf")),
+        )
+
+    def union(self, other: "AABB") -> "AABB":
+        return AABB(
+            Vec3(
+                min(self.minimum.x, other.minimum.x),
+                min(self.minimum.y, other.minimum.y),
+                min(self.minimum.z, other.minimum.z),
+            ),
+            Vec3(
+                max(self.maximum.x, other.maximum.x),
+                max(self.maximum.y, other.maximum.y),
+                max(self.maximum.z, other.maximum.z),
+            ),
+        )
+
+    def extent(self) -> Vec3:
+        return self.maximum - self.minimum
+
+    def intersects(self, ray: Ray, max_distance: float) -> bool:
+        t_min = 0.0
+        t_max = max_distance
+
+        for origin, direction, slab_min, slab_max in (
+            (ray.origin.x, ray.direction.x, self.minimum.x, self.maximum.x),
+            (ray.origin.y, ray.direction.y, self.minimum.y, self.maximum.y),
+            (ray.origin.z, ray.direction.z, self.minimum.z, self.maximum.z),
+        ):
+            if abs(direction) < EPSILON:
+                if origin < slab_min or origin > slab_max:
+                    return False
+                continue
+
+            inv_direction = 1.0 / direction
+            t0 = (slab_min - origin) * inv_direction
+            t1 = (slab_max - origin) * inv_direction
+            if t0 > t1:
+                t0, t1 = t1, t0
+
+            t_min = max(t_min, t0)
+            t_max = min(t_max, t1)
+            if t_max < t_min:
+                return False
+
+        return t_max > EPSILON
+
+
+@dataclass(slots=True)
 class Triangle:
     v0: Vec3
     v1: Vec3
     v2: Vec3
     material_id: int
+    edge1: Vec3 = field(init=False)
+    edge2: Vec3 = field(init=False)
     normal: Vec3 = field(init=False)
     area: float = field(init=False)
+    bounds: AABB = field(init=False)
+    centroid: Vec3 = field(init=False)
 
     def __post_init__(self) -> None:
-        cross = (self.v1 - self.v0).cross(self.v2 - self.v0)
+        self.edge1 = self.v1 - self.v0
+        self.edge2 = self.v2 - self.v0
+        cross = self.edge1.cross(self.edge2)
         self.area = 0.5 * cross.length()
         if self.area < EPSILON:
             raise ValueError("Degenerate triangle in scene.")
         self.normal = cross.normalize()
+        self.bounds = AABB(
+            Vec3(
+                min(self.v0.x, self.v1.x, self.v2.x) - EPSILON,
+                min(self.v0.y, self.v1.y, self.v2.y) - EPSILON,
+                min(self.v0.z, self.v1.z, self.v2.z) - EPSILON,
+            ),
+            Vec3(
+                max(self.v0.x, self.v1.x, self.v2.x) + EPSILON,
+                max(self.v0.y, self.v1.y, self.v2.y) + EPSILON,
+                max(self.v0.z, self.v1.z, self.v2.z) + EPSILON,
+            ),
+        )
+        self.centroid = (self.v0 + self.v1 + self.v2) / 3.0
 
     def sample_point(self, rng: random.Random) -> Vec3:
         u1 = rng.random()
@@ -127,20 +205,219 @@ class Triangle:
         return self.v0 * b0 + self.v1 * b1 + self.v2 * b2
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Hit:
     distance: float
     point: Vec3
     triangle_id: int
 
 
-@dataclass
+class NativeHitResult(ctypes.Structure):
+    _fields_ = [
+        ("hit", ctypes.c_int),
+        ("triangle_id", ctypes.c_int),
+        ("distance", ctypes.c_double),
+    ]
+
+
+def load_native_library() -> ctypes.CDLL | None:
+    library_names = (
+        "native_intersect.dll",
+        "native_intersect.so",
+        "native_intersect.dylib",
+    )
+    script_dir = Path(__file__).resolve().parent
+
+    for library_name in library_names:
+        library_path = script_dir / library_name
+        if not library_path.exists():
+            continue
+        try:
+            library = ctypes.CDLL(str(library_path))
+        except OSError:
+            continue
+
+        double_ptr = ctypes.POINTER(ctypes.c_double)
+        library.intersect_triangles.argtypes = [
+            double_ptr,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+        ]
+        library.intersect_triangles.restype = NativeHitResult
+        library.is_occluded_triangles.argtypes = [
+            double_ptr,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int,
+        ]
+        library.is_occluded_triangles.restype = ctypes.c_int
+        return library
+
+    return None
+
+
+NATIVE_LIBRARY = load_native_library()
+
+
+class NativeIntersector:
+    def __init__(self, triangles: list[Triangle]) -> None:
+        values: list[float] = []
+        for triangle in triangles:
+            values.extend(
+                (
+                    triangle.v0.x,
+                    triangle.v0.y,
+                    triangle.v0.z,
+                    triangle.edge1.x,
+                    triangle.edge1.y,
+                    triangle.edge1.z,
+                    triangle.edge2.x,
+                    triangle.edge2.y,
+                    triangle.edge2.z,
+                )
+            )
+
+        self.triangle_count = len(triangles)
+        self._data = (ctypes.c_double * len(values))(*values)
+
+    def intersect(self, ray: Ray, max_distance: float) -> tuple[int, float] | None:
+        if NATIVE_LIBRARY is None:
+            return None
+
+        result = NATIVE_LIBRARY.intersect_triangles(
+            self._data,
+            self.triangle_count,
+            ray.origin.x,
+            ray.origin.y,
+            ray.origin.z,
+            ray.direction.x,
+            ray.direction.y,
+            ray.direction.z,
+            max_distance,
+            EPSILON,
+        )
+        if not result.hit:
+            return None
+        return result.triangle_id, result.distance
+
+    def is_occluded(self, ray: Ray, max_distance: float, ignored_triangle_id: int) -> bool:
+        if NATIVE_LIBRARY is None:
+            return False
+
+        return bool(
+            NATIVE_LIBRARY.is_occluded_triangles(
+                self._data,
+                self.triangle_count,
+                ray.origin.x,
+                ray.origin.y,
+                ray.origin.z,
+                ray.direction.x,
+                ray.direction.y,
+                ray.direction.z,
+                max_distance,
+                EPSILON,
+                ignored_triangle_id,
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BVHNode:
+    bounds: AABB
+    left: "BVHNode | None" = None
+    right: "BVHNode | None" = None
+    triangle_ids: tuple[int, ...] = ()
+
+    def is_leaf(self) -> bool:
+        return bool(self.triangle_ids)
+
+
+BVH_LEAF_SIZE = 4
+
+
+def build_bvh(triangles: list[Triangle], triangle_ids: list[int]) -> BVHNode | None:
+    if not triangle_ids:
+        return None
+
+    bounds = AABB.empty()
+    for triangle_id in triangle_ids:
+        bounds = bounds.union(triangles[triangle_id].bounds)
+
+    if len(triangle_ids) <= BVH_LEAF_SIZE:
+        return BVHNode(bounds=bounds, triangle_ids=tuple(triangle_ids))
+
+    extent = bounds.extent()
+    if extent.x >= extent.y and extent.x >= extent.z:
+        axis = "x"
+    elif extent.y >= extent.z:
+        axis = "y"
+    else:
+        axis = "z"
+
+    sorted_ids = sorted(triangle_ids, key=lambda triangle_id: getattr(triangles[triangle_id].centroid, axis))
+    split = len(sorted_ids) // 2
+    if split <= 0 or split >= len(sorted_ids):
+        return BVHNode(bounds=bounds, triangle_ids=tuple(sorted_ids))
+
+    left = build_bvh(triangles, sorted_ids[:split])
+    right = build_bvh(triangles, sorted_ids[split:])
+    return BVHNode(bounds=bounds, left=left, right=right)
+
+
+def count_bvh_nodes(node: BVHNode | None) -> int:
+    if node is None:
+        return 0
+    return 1 + count_bvh_nodes(node.left) + count_bvh_nodes(node.right)
+
+
+@dataclass(slots=True)
 class Scene:
     materials: list[Material]
     triangles: list[Triangle]
     light_ids: list[int] = field(default_factory=list)
     light_cdf: list[float] = field(default_factory=list)
     light_power: float = 0.0
+    bvh: BVHNode | None = field(init=False, default=None)
+    native_intersector: NativeIntersector | None = field(init=False, default=None)
+
+    def __getstate__(self) -> tuple[list[Material], list[Triangle], list[int], list[float], float, BVHNode | None]:
+        return (
+            self.materials,
+            self.triangles,
+            self.light_ids,
+            self.light_cdf,
+            self.light_power,
+            self.bvh,
+        )
+
+    def __setstate__(
+        self,
+        state: tuple[list[Material], list[Triangle], list[int], list[float], float, BVHNode | None],
+    ) -> None:
+        (
+            self.materials,
+            self.triangles,
+            self.light_ids,
+            self.light_cdf,
+            self.light_power,
+            self.bvh,
+        ) = state
+        self.native_intersector = None
+        self.rebuild_native_intersector()
 
     def rebuild_lights(self) -> None:
         weights: list[float] = []
@@ -166,7 +443,30 @@ class Scene:
             self.light_cdf.append(running)
         self.light_cdf[-1] = 1.0
 
+    def rebuild_bvh(self) -> None:
+        self.bvh = build_bvh(self.triangles, list(range(len(self.triangles))))
+
+    def rebuild_native_intersector(self) -> None:
+        if NATIVE_LIBRARY is None or len(self.triangles) > NATIVE_FLAT_TRIANGLE_LIMIT:
+            self.native_intersector = None
+            return
+        self.native_intersector = NativeIntersector(self.triangles)
+
     def intersect(self, ray: Ray, max_distance: float = float("inf")) -> Hit | None:
+        if self.native_intersector is not None:
+            native_hit = self.native_intersector.intersect(ray, max_distance)
+            if native_hit is None:
+                return None
+            triangle_id, distance = native_hit
+            return Hit(
+                distance=distance,
+                point=ray.origin + ray.direction * distance,
+                triangle_id=triangle_id,
+            )
+
+        if self.bvh is not None:
+            return self._intersect_bvh(ray, max_distance)
+
         best_distance = max_distance
         best_triangle_id = -1
 
@@ -185,11 +485,76 @@ class Scene:
         )
 
     def is_occluded(self, ray: Ray, max_distance: float, ignored_triangle_id: int) -> bool:
+        if self.native_intersector is not None:
+            return self.native_intersector.is_occluded(ray, max_distance, ignored_triangle_id)
+
+        if self.bvh is not None:
+            return self._is_occluded_bvh(ray, max_distance, ignored_triangle_id)
+
         for triangle_id, triangle in enumerate(self.triangles):
             if triangle_id == ignored_triangle_id:
                 continue
             if intersect_triangle(ray, triangle, max_distance) is not None:
                 return True
+        return False
+
+    def _intersect_bvh(self, ray: Ray, max_distance: float) -> Hit | None:
+        if self.bvh is None:
+            return None
+
+        best_distance = max_distance
+        best_triangle_id = -1
+        stack = [self.bvh]
+
+        while stack:
+            node = stack.pop()
+            if not node.bounds.intersects(ray, best_distance):
+                continue
+
+            if node.is_leaf():
+                for triangle_id in node.triangle_ids:
+                    distance = intersect_triangle(ray, self.triangles[triangle_id], best_distance)
+                    if distance is not None and distance < best_distance:
+                        best_distance = distance
+                        best_triangle_id = triangle_id
+                continue
+
+            if node.left is not None:
+                stack.append(node.left)
+            if node.right is not None:
+                stack.append(node.right)
+
+        if best_triangle_id < 0:
+            return None
+        return Hit(
+            distance=best_distance,
+            point=ray.origin + ray.direction * best_distance,
+            triangle_id=best_triangle_id,
+        )
+
+    def _is_occluded_bvh(self, ray: Ray, max_distance: float, ignored_triangle_id: int) -> bool:
+        if self.bvh is None:
+            return False
+
+        stack = [self.bvh]
+        while stack:
+            node = stack.pop()
+            if not node.bounds.intersects(ray, max_distance):
+                continue
+
+            if node.is_leaf():
+                for triangle_id in node.triangle_ids:
+                    if triangle_id == ignored_triangle_id:
+                        continue
+                    if intersect_triangle(ray, self.triangles[triangle_id], max_distance) is not None:
+                        return True
+                continue
+
+            if node.left is not None:
+                stack.append(node.left)
+            if node.right is not None:
+                stack.append(node.right)
+
         return False
 
     def sample_light(self, rng: random.Random) -> tuple[int, float]:
@@ -207,7 +572,7 @@ class Scene:
         return triangle_id, 1.0 - prev_cdf
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Camera:
     origin: Vec3
     forward: Vec3
@@ -237,8 +602,8 @@ class Camera:
 
 
 def intersect_triangle(ray: Ray, triangle: Triangle, max_distance: float) -> float | None:
-    edge1 = triangle.v1 - triangle.v0
-    edge2 = triangle.v2 - triangle.v0
+    edge1 = triangle.edge1
+    edge2 = triangle.edge2
     pvec = ray.direction.cross(edge2)
     determinant = edge1.dot(pvec)
     if abs(determinant) < EPSILON:
@@ -507,6 +872,8 @@ def make_scene(args: argparse.Namespace) -> Scene:
 
     scene = Scene(materials, triangles)
     scene.rebuild_lights()
+    scene.rebuild_bvh()
+    scene.rebuild_native_intersector()
     return scene
 
 
@@ -637,6 +1004,8 @@ def write_stats(path: Path, args: argparse.Namespace, scene: Scene, normalizatio
             f"seed: {args.seed}",
             f"triangles: {len(scene.triangles)}",
             f"emissive_triangles: {len(scene.light_ids)}",
+            f"bvh_nodes: {count_bvh_nodes(scene.bvh)}",
+            f"native_intersector: {'c_flat_scan' if scene.native_intersector is not None else 'python_bvh'}",
             f"normalization_white_point: {normalization:.8g}",
             f"elapsed_seconds: {elapsed:.3f}",
             "",
