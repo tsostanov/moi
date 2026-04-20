@@ -111,12 +111,41 @@ def build_count_table(bin_name: str, counts: list[int], expected: float) -> str:
     )
 
 
+def build_variable_count_table(bin_name: str, labels: list[str], counts: list[int], expected_counts: list[float]) -> str:
+    rows = []
+    for label, count, expected in zip(labels, counts, expected_counts):
+        diff = count - expected
+        rel = 100.0 * diff / expected
+        rows.append(
+            [
+                label,
+                str(count),
+                f"{expected:.1f}",
+                f"{diff:+.1f}",
+                f"{rel:+.2f}%",
+            ]
+        )
+    return format_table(
+        [bin_name, "число", "ожид.", "разн.", "разн. %"],
+        rows,
+        alignments="lrrrr",
+    )
+
+
 def chi_square_stat(counts: list[int], expected: float) -> float:
     return sum(((count - expected) ** 2) / expected for count in counts)
 
 
+def chi_square_stat_variable(counts: list[int], expected_counts: list[float]) -> float:
+    return sum(((count - expected) ** 2) / expected for count, expected in zip(counts, expected_counts))
+
+
 def max_relative_deviation_percent(counts: list[int], expected: float) -> float:
     return max(abs(count - expected) / expected for count in counts) * 100.0
+
+
+def max_relative_deviation_percent_variable(counts: list[int], expected_counts: list[float]) -> float:
+    return max(abs(count - expected) / expected for count, expected in zip(counts, expected_counts)) * 100.0
 
 
 def rms_relative_deviation_percent(counts: list[int], expected: float) -> float:
@@ -520,12 +549,84 @@ def create_cosine_plot() -> Path:
     return save_figure(fig, "cosine_distribution.png")
 
 
+def create_cosine_function_plot() -> Path:
+    normal = cosine_parameters()
+    basis = build_basis(normal)
+    rng = random.Random(seed_from_key("cosine-law-plot"))
+    cosines: list[float] = []
+    thetas: list[float] = []
+
+    for _ in range(PLOT_SAMPLE_COUNT):
+        _, cosine, _ = sample_cosine_direction(basis, rng)
+        cosines.append(cosine)
+        thetas.append(math.acos(max(0.0, min(1.0, cosine))))
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+    mu_ax, theta_ax = axes
+
+    mu_counts, mu_bins, _ = mu_ax.hist(
+        cosines,
+        bins=24,
+        range=(0.0, 1.0),
+        density=True,
+        color="#f08c2e",
+        edgecolor="#6b3a00",
+        alpha=0.8,
+        label="эмпирическая плотность",
+    )
+    mu_centers = [(mu_bins[index] + mu_bins[index + 1]) * 0.5 for index in range(len(mu_bins) - 1)]
+    xs = [index / 200.0 for index in range(201)]
+    mu_ax.plot(xs, [2.0 * x for x in xs], color="#8b1e3f", linewidth=2.1, label="теория: p(mu)=2mu")
+    mu_ax.plot(mu_centers, mu_counts, color="#102a43", linewidth=1.2, marker="o", markersize=3.0, label="центры бинов")
+    mu_ax.set_title("Проверка по mu = cos(theta)")
+    mu_ax.set_xlabel("mu")
+    mu_ax.set_ylabel("плотность")
+    mu_ax.set_xlim(0.0, 1.0)
+    mu_ax.set_ylim(0.0, 2.15)
+    mu_ax.legend()
+    style_axes(mu_ax)
+
+    theta_ax.hist(
+        thetas,
+        bins=24,
+        range=(0.0, 0.5 * math.pi),
+        density=True,
+        color="#4c956c",
+        edgecolor="#1f4d2e",
+        alpha=0.8,
+        label="эмпирическая плотность",
+    )
+    theta_xs = [0.5 * math.pi * index / 300.0 for index in range(301)]
+    theta_ax.plot(
+        theta_xs,
+        [math.sin(2.0 * theta) for theta in theta_xs],
+        color="#8b1e3f",
+        linewidth=2.1,
+        label="теория: p(theta)=sin(2theta)",
+    )
+    theta_ax.set_title("То же распределение по углу theta")
+    theta_ax.set_xlabel("theta, рад")
+    theta_ax.set_ylabel("плотность")
+    theta_ax.set_xlim(0.0, 0.5 * math.pi)
+    theta_ax.set_ylim(0.0, 1.15)
+    theta_ax.set_xticks(
+        [0.0, math.pi / 8.0, math.pi / 4.0, 3.0 * math.pi / 8.0, math.pi / 2.0],
+        ["0", "pi/8", "pi/4", "3pi/8", "pi/2"],
+    )
+    theta_ax.legend()
+    style_axes(theta_ax)
+
+    fig.suptitle("Проверка, что выборка действительно подчиняется косинусному закону")
+    return save_figure(fig, "cosine_function.png")
+
+
 def create_all_plots() -> list[Path]:
     return [
         create_triangle_plot(),
         create_disk_plot(),
         create_uniform_sphere_plot(),
         create_cosine_plot(),
+        create_cosine_function_plot(),
     ]
 
 
@@ -718,7 +819,7 @@ def analyze_cosine_directions() -> str:
     max_norm_error = 0.0
     min_cosine = 1.0
     cosine_sum = 0.0
-    u_counts = [0] * 10
+    theta_counts = [0] * 10
     sector_counts = [0] * 8
 
     for _ in range(SAMPLE_COUNT):
@@ -731,14 +832,21 @@ def analyze_cosine_directions() -> str:
         if norm_error > 1e-7 or direction.dot(normal) < -1e-7:
             invalid_count += 1
 
-        u = cosine * cosine
-        u_index = min(int(u * len(u_counts)), len(u_counts) - 1)
+        theta = math.acos(max(0.0, min(1.0, cosine)))
+        theta_index = min(int((theta / (0.5 * math.pi)) * len(theta_counts)), len(theta_counts) - 1)
         sector_index = phi_bin_index(phi, len(sector_counts))
-        u_counts[u_index] += 1
+        theta_counts[theta_index] += 1
         sector_counts[sector_index] += 1
 
     mean_cosine = cosine_sum / SAMPLE_COUNT
-    expected_u = SAMPLE_COUNT / len(u_counts)
+    theta_labels: list[str] = []
+    expected_theta_counts: list[float] = []
+    for index in range(len(theta_counts)):
+        theta_start = 0.5 * math.pi * index / len(theta_counts)
+        theta_end = 0.5 * math.pi * (index + 1) / len(theta_counts)
+        theta_labels.append(f"{math.degrees(theta_start):4.1f}-{math.degrees(theta_end):4.1f}")
+        expected_probability = math.sin(theta_end) ** 2 - math.sin(theta_start) ** 2
+        expected_theta_counts.append(SAMPLE_COUNT * expected_probability)
     expected_sector = SAMPLE_COUNT / len(sector_counts)
 
     lines = [
@@ -746,7 +854,7 @@ def analyze_cosine_directions() -> str:
         f"N = {format_vec(normal)}",
         "формирование: сначала выбирается точка единичного круга x = sqrt(u1)*cos(phi), y = sqrt(u1)*sin(phi),",
         "z = sqrt(1-u1), w = T*x + B*y + N*z",
-        "идея доказательства: получается плотность pdf(w) = cos(theta)/pi на полусфере; эквивалентно, u = cos^2(theta) распределена равномерно, а phi равномерна.",
+        "идея доказательства: получается плотность pdf(w) = cos(theta)/pi на полусфере; поэтому для равных интервалов theta ожидаемые частоты не одинаковы и задаются интегралом p(theta) = sin(2theta).",
         build_metrics_table(
             [
                 ("число сгенерированных направлений", str(SAMPLE_COUNT)),
@@ -756,14 +864,14 @@ def analyze_cosine_directions() -> str:
                 ("min dot(N, w)", f"{min_cosine:.6f}"),
                 ("выборочное среднее cos(theta)", f"{mean_cosine:.6f}"),
                 ("теоретическое среднее cos(theta)", f"{2.0 / 3.0:.6f}"),
-                ("chi^2 по u-интервалам", f"{chi_square_stat(u_counts, expected_u):.6f}"),
-                ("макс. отклонение по u", f"{max_relative_deviation_percent(u_counts, expected_u):.3f}%"),
+                ("chi^2 по theta-интервалам", f"{chi_square_stat_variable(theta_counts, expected_theta_counts):.6f}"),
+                ("макс. отклонение по theta", f"{max_relative_deviation_percent_variable(theta_counts, expected_theta_counts):.3f}%"),
                 ("chi^2 по секторам", f"{chi_square_stat(sector_counts, expected_sector):.6f}"),
                 ("макс. отклонение по секторам", f"{max_relative_deviation_percent(sector_counts, expected_sector):.3f}%"),
             ]
         ),
-        "Интервалы u = cos^2(theta): ожидаемое число = N / 10",
-        build_count_table("u-инт.", u_counts, expected_u),
+        "Интервалы theta на [0, pi/2]: ожидаемые числа берутся из интеграла плотности p(theta) = sin(2theta)",
+        build_variable_count_table("theta, град", theta_labels, theta_counts, expected_theta_counts),
         "Азимутальные секторы: ожидаемое число = N / 8",
         build_count_table("сектор", sector_counts, expected_sector),
         "",

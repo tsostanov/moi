@@ -42,7 +42,7 @@ python 04/main.py
 python 04/gui.py
 ```
 
-В `gui.py` можно менять разрешение, число сэмплов, глубину трассировки, русскую рулетку, число worker-процессов, размер чанка строк, сцену, материал, камеру, свет, OBJ-файл и путь вывода. Кнопка `Start render` запускает `main.py` в отдельном процессе, лог рендера показывается в окне. Кнопка `Stop` останавливает текущий рендер вместе с дочерними worker-процессами. Результат сохраняется в PPM, PNG и TXT так же, как при запуске из консоли.
+В `gui.py` можно менять разрешение, число сэмплов, глубину трассировки, русскую рулетку, число worker-процессов, размер чанка строк, сцену, материал, камеру, свет, OBJ-файл и путь вывода. Кнопка `Start render` запускает `main.py` в отдельном процессе, лог рендера показывается в окне. В Windows кнопка `Stop` останавливает текущий рендер вместе с дочерними worker-процессами. Результат сохраняется в PPM, PNG и TXT так же, как при запуске из консоли.
 
 В интерфейсе есть пресеты:
 
@@ -52,7 +52,7 @@ python 04/gui.py
 
 По умолчанию используется `500x500`, `1 spp`, `max-depth 2`, чтобы расчет не был слишком долгим. Для более чистой картинки увеличивайте `--samples`.
 
-Результат сохраняется в:
+При запуске без параметров результат сохраняется в:
 
 ```text
 04/outputs/render.ppm
@@ -62,6 +62,19 @@ python 04/gui.py
 
 Файл `render.ppm` содержит изображение в формате PPM P6. Файл `render.png` создается автоматически из тех же нормированных и gamma-corrected RGB-данных, поэтому его удобно открывать обычным просмотрщиком и вставлять в отчет. Файл `render.txt` содержит параметры запуска, число треугольников, число источников, нормировочный коэффициент и список материалов.
 
+В репозитории для сдачи оставлены два готовых набора:
+
+```text
+04/outputs/final.ppm
+04/outputs/final.png
+04/outputs/final.txt
+04/outputs/test.ppm
+04/outputs/test.png
+04/outputs/test.txt
+```
+
+`final.png` - основная демонстрационная картинка для отчета. `final.ppm` - тот же результат в формате, требуемом заданием. `final.txt` содержит параметры финального запуска.
+
 ## Примеры для защиты
 
 Важно: в `--output` лучше указывать путь к `.ppm`. PNG-файл создается автоматически рядом с тем же именем.
@@ -69,31 +82,31 @@ python 04/gui.py
 Быстрый тест с маленьким разрешением:
 
 ```bash
-python 04/main.py --width 120 --height 120 --samples 2 --output 04/outputs/test.ppm
-```
-
-Нормальный рендер для проверки алгоритма:
-
-```bash
-python 04/main.py --width 500 --height 500 --samples 16 --max-depth 4 --rr-depth 3 --output 04/outputs/render_500_16spp.ppm
+python 04/main.py --width 240 --height 240 --samples 2 --max-depth 3 --rr-depth 3 --workers 4 --chunk-rows 24 --output 04/outputs/test.ppm
 ```
 
 Финальный рендер с допустимым разрешением:
 
 ```bash
-python 04/main.py --width 500 --height 500 --samples 64 --max-depth 5 --rr-depth 3 --output 04/outputs/render_500_64spp.ppm
+python 04/main.py --width 500 --height 500 --samples 32 --max-depth 6 --rr-depth 3 --white-point 3.2 --workers 4 --chunk-rows 16 --output 04/outputs/final.ppm
+```
+
+Более быстрый финальный вариант, если время расчета ограничено:
+
+```bash
+python 04/main.py --width 500 --height 500 --samples 16 --max-depth 4 --rr-depth 3 --workers 4 --chunk-rows 16 --output 04/outputs/final.ppm
 ```
 
 Если нужно ускорить расчет на многоядерном процессоре:
 
 ```bash
-python 04/main.py --width 500 --height 500 --samples 64 --max-depth 5 --rr-depth 3 --workers 4 --output 04/outputs/render_500_64spp.ppm
+python 04/main.py --width 500 --height 500 --samples 32 --max-depth 6 --rr-depth 3 --white-point 3.2 --workers 4 --chunk-rows 16 --output 04/outputs/final.ppm
 ```
 
 Параметр `--chunk-rows` управляет размером задания для worker-процесса. Слишком маленькое значение чаще печатает прогресс, но увеличивает накладные расходы multiprocessing. Для 500x500 обычно удобно `16` или `32`:
 
 ```bash
-python 04/main.py --width 500 --height 500 --samples 32 --max-depth 5 --rr-depth 3 --workers 4 --chunk-rows 16 --output 04/outputs/render_500_32spp.ppm
+python 04/main.py --width 500 --height 500 --samples 32 --max-depth 5 --rr-depth 3 --workers 4 --chunk-rows 16 --output 04/outputs/final.ppm
 ```
 
 Сравнение шума при разном числе лучей на пиксель:
@@ -197,10 +210,8 @@ python 04/main.py --obj model.obj --obj-scale 0.4 --obj-offset 0 0 0.2
 Минимальный набор картинок для демонстрации:
 
 ```bash
-python 04/main.py --width 500 --height 500 --samples 4 --max-depth 4 --output 04/outputs/demo_low.ppm
-python 04/main.py --width 500 --height 500 --samples 64 --max-depth 5 --rr-depth 3 --output 04/outputs/demo_high.ppm
-python 04/main.py --width 500 --height 500 --samples 32 --max-depth 5 --material-mode diffuse --output 04/outputs/demo_diffuse.ppm
-python 04/main.py --width 500 --height 500 --samples 32 --max-depth 5 --material-mode mirror --output 04/outputs/demo_mirror.ppm
+python 04/main.py --width 240 --height 240 --samples 2 --max-depth 3 --rr-depth 3 --workers 4 --chunk-rows 24 --output 04/outputs/test.ppm
+python 04/main.py --width 500 --height 500 --samples 32 --max-depth 6 --rr-depth 3 --white-point 3.2 --workers 4 --chunk-rows 16 --output 04/outputs/final.ppm
 ```
 
 Для отчета лучше вставлять PNG-файлы с теми же именами: программа создаст их автоматически рядом с PPM.

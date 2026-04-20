@@ -1,13 +1,13 @@
 Lab 4 path tracing run
-image: 120x120
+image: 240x240
 samples_per_pixel: 2
-max_depth: 4
+max_depth: 3
 russian_roulette_from_depth: 3
 seed: 20260419
-triangles: 30
+triangles: 36
 emissive_triangles: 2
 normalization_white_point: 12
-elapsed_seconds: 15.277
+elapsed_seconds: 78.452
 
 Materials:
 - white wall: diffuse=Vec3(x=0.72, y=0.72, z=0.72), specular=Vec3(x=0.0, y=0.0, z=0.0), emission=Vec3(x=0.0, y=0.0, z=0.0)

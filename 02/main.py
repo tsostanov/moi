@@ -274,7 +274,6 @@ def build_method_table(rows: list[MethodResult]) -> str:
 
 def build_console_report(results: dict[str, list[MethodResult]]) -> str:
     sections: list[str] = []
-    sections.append("LAB 2: MONTE CARLO INTEGRATION")
     sections.append(f"f(x) = x^2, interval = [{A:.0f}, {B:.0f}], I_true = {TRUE_INTEGRAL:.6f}")
     sections.append(f"N = {', '.join(str(n) for n in SAMPLE_SIZES)}, seed = {BASE_SEED}")
     sections.append("importance pdfs: q1(x)=2x/21, q2(x)=x^2/39, q3(x)=4x^3/609")
