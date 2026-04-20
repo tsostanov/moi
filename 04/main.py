@@ -387,6 +387,21 @@ def add_quad(
     triangles.append(Triangle(v0, v2, v3, material_id))
 
 
+def add_ceiling_with_light_slot(
+    triangles: list[Triangle],
+    material_id: int,
+    y: float,
+    room_min: float,
+    room_max: float,
+    slot_min: float,
+    slot_max: float,
+) -> None:
+    add_quad(triangles, Vec3(room_min, y, room_min), Vec3(room_max, y, room_min), Vec3(room_max, y, slot_min), Vec3(room_min, y, slot_min), material_id)
+    add_quad(triangles, Vec3(room_min, y, slot_max), Vec3(room_max, y, slot_max), Vec3(room_max, y, room_max), Vec3(room_min, y, room_max), material_id)
+    add_quad(triangles, Vec3(room_min, y, slot_min), Vec3(slot_min, y, slot_min), Vec3(slot_min, y, slot_max), Vec3(room_min, y, slot_max), material_id)
+    add_quad(triangles, Vec3(slot_max, y, slot_min), Vec3(room_max, y, slot_min), Vec3(room_max, y, slot_max), Vec3(slot_max, y, slot_max), material_id)
+
+
 def add_box(triangles: list[Triangle], p_min: Vec3, p_max: Vec3, material_id: int) -> None:
     xmin, ymin, zmin = p_min.x, p_min.y, p_min.z
     xmax, ymax, zmax = p_max.x, p_max.y, p_max.z
@@ -473,12 +488,12 @@ def make_scene(args: argparse.Namespace) -> Scene:
     triangles: list[Triangle] = []
 
     add_quad(triangles, Vec3(-1.0, 0.0, -1.0), Vec3(-1.0, 0.0, 1.0), Vec3(1.0, 0.0, 1.0), Vec3(1.0, 0.0, -1.0), white)
-    add_quad(triangles, Vec3(-1.0, 2.0, -1.0), Vec3(1.0, 2.0, -1.0), Vec3(1.0, 2.0, 1.0), Vec3(-1.0, 2.0, 1.0), white)
+    add_ceiling_with_light_slot(triangles, white, 2.0, -1.0, 1.0, -0.35, 0.35)
     add_quad(triangles, Vec3(-1.0, 0.0, -1.0), Vec3(1.0, 0.0, -1.0), Vec3(1.0, 2.0, -1.0), Vec3(-1.0, 2.0, -1.0), white)
     add_quad(triangles, Vec3(-1.0, 0.0, 1.0), Vec3(-1.0, 0.0, -1.0), Vec3(-1.0, 2.0, -1.0), Vec3(-1.0, 2.0, 1.0), red)
     add_quad(triangles, Vec3(1.0, 0.0, -1.0), Vec3(1.0, 0.0, 1.0), Vec3(1.0, 2.0, 1.0), Vec3(1.0, 2.0, -1.0), green)
 
-    add_quad(triangles, Vec3(-0.35, 1.985, -0.35), Vec3(0.35, 1.985, -0.35), Vec3(0.35, 1.985, 0.35), Vec3(-0.35, 1.985, 0.35), light)
+    add_quad(triangles, Vec3(-0.35, 2.0, -0.35), Vec3(0.35, 2.0, -0.35), Vec3(0.35, 2.0, 0.35), Vec3(-0.35, 2.0, 0.35), light)
 
     if args.scene == "cornell":
         add_box(triangles, Vec3(0.25, 0.0, -0.55), Vec3(0.75, 0.85, -0.05), mirror)
