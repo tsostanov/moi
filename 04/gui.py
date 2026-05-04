@@ -36,8 +36,8 @@ class RenderGui:
             "chunk_rows": tk.StringVar(value="16"),
             "scene": tk.StringVar(value="cornell"),
             "material_mode": tk.StringVar(value="balanced"),
-            "camera": tk.StringVar(value="0 1.05 3.35"),
-            "look_at": tk.StringVar(value="0 0.92 0"),
+            "camera": tk.StringVar(value="-0.28 1.08 3.45"),
+            "look_at": tk.StringVar(value="0.08 0.9 -0.08"),
             "fov": tk.StringVar(value="42"),
             "light_scale": tk.StringVar(value="1.0"),
             "obj": tk.StringVar(value=""),
@@ -256,6 +256,8 @@ class RenderGui:
                 "rr_depth": "3",
                 "workers": "4",
                 "chunk_rows": "24",
+                "camera": "-0.28 1.08 3.45",
+                "look_at": "0.08 0.9 -0.08",
                 "output": str(OUTPUT_DIR / "preview.ppm"),
             }
         elif preset == "balanced":
@@ -267,6 +269,8 @@ class RenderGui:
                 "rr_depth": "3",
                 "workers": "4",
                 "chunk_rows": "16",
+                "camera": "-0.28 1.08 3.45",
+                "look_at": "0.08 0.9 -0.08",
                 "output": str(OUTPUT_DIR / "balanced.ppm"),
             }
         else:
@@ -278,6 +282,8 @@ class RenderGui:
                 "rr_depth": "3",
                 "workers": "4",
                 "chunk_rows": "16",
+                "camera": "-0.28 1.08 3.45",
+                "look_at": "0.08 0.9 -0.08",
                 "output": str(OUTPUT_DIR / "final.ppm"),
             }
 

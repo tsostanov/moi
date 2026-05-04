@@ -859,22 +859,29 @@ def make_scene(args: argparse.Namespace) -> Scene:
 
     if args.material_mode == "diffuse":
         object_specular = Vec3(0.0, 0.0, 0.0)
+        box_diffuse = Vec3(0.42, 0.42, 0.46)
+        box_specular = Vec3(0.0, 0.0, 0.0)
     elif args.material_mode == "mirror":
         object_specular = Vec3(0.82, 0.82, 0.82)
+        box_diffuse = Vec3(0.04, 0.04, 0.04)
+        box_specular = Vec3(0.86, 0.86, 0.86)
     else:
         object_specular = Vec3(0.25, 0.25, 0.25)
+        # Keep the box glossy, but with enough diffuse energy to read as a solid object.
+        box_diffuse = Vec3(0.30, 0.30, 0.34)
+        box_specular = Vec3(0.20, 0.20, 0.20)
 
     materials = [
         Material("white wall", Vec3(0.72, 0.72, 0.72)),
         Material("red wall", Vec3(0.75, 0.12, 0.10)),
         Material("green wall", Vec3(0.12, 0.62, 0.18)),
         Material("mixed object", Vec3(0.45, 0.36, 0.22), object_specular),
-        Material("mirror object", Vec3(0.04, 0.04, 0.04), Vec3(0.86, 0.86, 0.86)),
+        Material("box object", box_diffuse, box_specular),
         Material("area light", BLACK, BLACK, light_color),
         Material("obj material", Vec3(0.34, 0.50, 0.78), Vec3(0.18, 0.18, 0.18)),
     ]
 
-    white, red, green, mixed, mirror, light, obj_material = range(len(materials))
+    white, red, green, mixed, box, light, obj_material = range(len(materials))
     triangles: list[Triangle] = []
 
     add_quad(triangles, Vec3(-1.0, 0.0, -1.0), Vec3(-1.0, 0.0, 1.0), Vec3(1.0, 0.0, 1.0), Vec3(1.0, 0.0, -1.0), white)
@@ -886,11 +893,11 @@ def make_scene(args: argparse.Namespace) -> Scene:
     add_quad(triangles, Vec3(-0.35, 2.0, -0.35), Vec3(0.35, 2.0, -0.35), Vec3(0.35, 2.0, 0.35), Vec3(-0.35, 2.0, 0.35), light)
 
     if args.scene == "cornell":
-        add_box(triangles, Vec3(0.25, 0.0, -0.55), Vec3(0.75, 0.85, -0.05), mirror)
+        add_box(triangles, Vec3(0.22, 0.0, -0.48), Vec3(0.72, 0.82, 0.08), box)
         add_pyramid(triangles, Vec3(-0.42, 0.0, 0.20), 0.35, 0.85, mixed)
     else:
         add_box(triangles, Vec3(-0.62, 0.0, -0.40), Vec3(-0.12, 0.70, 0.10), mixed)
-        add_box(triangles, Vec3(0.15, 0.0, -0.72), Vec3(0.72, 1.15, -0.15), mirror)
+        add_box(triangles, Vec3(0.15, 0.0, -0.72), Vec3(0.72, 1.15, -0.15), box)
 
     if args.obj:
         triangles.extend(load_obj_triangles(Path(args.obj), obj_material, args.obj_scale, Vec3(*args.obj_offset)))
@@ -1071,8 +1078,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260419)
     parser.add_argument("--scene", choices=("cornell", "mirror-test"), default="cornell")
     parser.add_argument("--material-mode", choices=("balanced", "diffuse", "mirror"), default="balanced")
-    parser.add_argument("--camera", nargs=3, type=float, default=(0.0, 1.05, 3.35), metavar=("X", "Y", "Z"))
-    parser.add_argument("--look-at", nargs=3, type=float, default=(0.0, 0.92, 0.0), metavar=("X", "Y", "Z"))
+    parser.add_argument("--camera", nargs=3, type=float, default=(-0.28, 1.08, 3.45), metavar=("X", "Y", "Z"))
+    parser.add_argument("--look-at", nargs=3, type=float, default=(0.08, 0.90, -0.08), metavar=("X", "Y", "Z"))
     parser.add_argument("--fov", type=float, default=42.0)
     parser.add_argument("--light-color", nargs=3, type=float, default=(12.0, 10.4, 8.6), metavar=("R", "G", "B"))
     parser.add_argument("--light-scale", type=float, default=1.0)
