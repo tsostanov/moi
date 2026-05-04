@@ -386,13 +386,25 @@ class RenderGui:
         if not png_path.exists():
             messagebox.showinfo("PNG not found", f"No PNG file yet:\n{png_path}")
             return
-        os.startfile(png_path)
+        self._open_path(png_path)
 
     def _open_output_folder(self) -> None:
         output_path = Path(self.vars["output"].get())
         folder = output_path.parent if output_path.parent else OUTPUT_DIR
         folder.mkdir(parents=True, exist_ok=True)
-        os.startfile(folder)
+        self._open_path(folder)
+
+    def _open_path(self, path: Path) -> None:
+        try:
+            if os.name == "nt":
+                os.startfile(path)
+                return
+            if sys.platform == "darwin":
+                subprocess.run(["open", str(path)], check=True)
+                return
+            subprocess.run(["xdg-open", str(path)], check=True)
+        except (AttributeError, OSError, subprocess.SubprocessError) as error:
+            messagebox.showerror("Cannot open path", f"{path}\n\n{error}")
 
     def _on_close(self) -> None:
         if self.process is not None:

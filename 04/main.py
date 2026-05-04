@@ -4,8 +4,10 @@ import argparse
 import concurrent.futures
 import ctypes
 import math
+import os
 import random
 import struct
+import sys
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -15,6 +17,14 @@ from pathlib import Path
 EPSILON = 1e-6
 GAMMA = 2.2
 NATIVE_FLAT_TRIANGLE_LIMIT = 512
+_WORKER_SCENE: "Scene | None" = None
+_WORKER_CAMERA: "Camera | None" = None
+_WORKER_ARGS: argparse.Namespace | None = None
+WINDOWS_DLL_DIRS = (
+    Path(r"C:\msys64\ucrt64\bin"),
+    Path(r"C:\msys64\mingw64\bin"),
+    Path(r"C:\mingw64\bin"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +230,18 @@ class NativeHitResult(ctypes.Structure):
     ]
 
 
+def add_windows_dll_dirs() -> None:
+    if sys.platform != "win32":
+        return
+    for directory in WINDOWS_DLL_DIRS:
+        if not directory.exists():
+            continue
+        try:
+            os.add_dll_directory(str(directory))
+        except (AttributeError, OSError):
+            continue
+
+
 def load_native_library() -> ctypes.CDLL | None:
     library_names = (
         "native_intersect.dll",
@@ -227,6 +249,7 @@ def load_native_library() -> ctypes.CDLL | None:
         "native_intersect.dylib",
     )
     script_dir = Path(__file__).resolve().parent
+    add_windows_dll_dirs()
 
     for library_name in library_names:
         library_path = script_dir / library_name
@@ -583,8 +606,10 @@ class Camera:
 
     @classmethod
     def look_at(cls, origin: Vec3, target: Vec3, fov_degrees: float, aspect: float) -> "Camera":
+        if (target - origin).length() < EPSILON:
+            raise ValueError("Camera origin and look-at target must be different.")
         forward = (target - origin).normalize()
-        world_up = Vec3(0.0, 1.0, 0.0)
+        world_up = Vec3(0.0, 1.0, 0.0) if abs(forward.y) < 0.999 else Vec3(0.0, 0.0, 1.0)
         right = forward.cross(world_up).normalize()
         up = right.cross(forward).normalize()
         vertical_scale = math.tan(math.radians(fov_degrees) * 0.5)
@@ -890,6 +915,19 @@ def render_rows(y_start: int, y_end: int, scene: Scene, camera: Camera, args: ar
     return y_start, rows
 
 
+def _init_worker(scene: Scene, camera: Camera, args: argparse.Namespace) -> None:
+    global _WORKER_SCENE, _WORKER_CAMERA, _WORKER_ARGS
+    _WORKER_SCENE = scene
+    _WORKER_CAMERA = camera
+    _WORKER_ARGS = args
+
+
+def _render_rows_task(y_start: int, y_end: int) -> tuple[int, list[Vec3]]:
+    if _WORKER_SCENE is None or _WORKER_CAMERA is None or _WORKER_ARGS is None:
+        raise RuntimeError("Worker render context is not initialized.")
+    return render_rows(y_start, y_end, _WORKER_SCENE, _WORKER_CAMERA, _WORKER_ARGS)
+
+
 def render(scene: Scene, camera: Camera, args: argparse.Namespace) -> list[Vec3]:
     framebuffer = [BLACK for _ in range(args.width * args.height)]
     start_time = time.monotonic()
@@ -917,9 +955,13 @@ def render(scene: Scene, camera: Camera, args: argparse.Namespace) -> list[Vec3]
     )
     completed_rows = 0
     try:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as executor:
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=args.workers,
+            initializer=_init_worker,
+            initargs=(scene, camera, args),
+        ) as executor:
             futures = [
-                executor.submit(render_rows, y_start, y_end, scene, camera, args)
+                executor.submit(_render_rows_task, y_start, y_end)
                 for y_start, y_end in tasks
             ]
             for future in concurrent.futures.as_completed(futures):
@@ -1044,32 +1086,41 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     if args.width <= 0 or args.height <= 0:
-        raise ValueError("Image dimensions must be positive.")
+        parser.error("Image dimensions must be positive.")
     if args.width > 1000 or args.height > 1000:
-        raise ValueError("Lab requirement: image size must not exceed 1000x1000.")
+        parser.error("Lab requirement: image size must not exceed 1000x1000.")
     if args.width < 500 or args.height < 500:
         print("warning: final lab image should be at least 500x500; this size is useful only for quick tests.")
     if args.samples <= 0:
-        raise ValueError("Samples per pixel must be positive.")
+        parser.error("Samples per pixel must be positive.")
     if args.max_depth <= 0:
-        raise ValueError("Max depth must be positive.")
+        parser.error("Max depth must be positive.")
+    if args.rr_depth < 0:
+        parser.error("Russian roulette depth must be non-negative.")
     if args.workers <= 0:
-        raise ValueError("Workers must be positive.")
+        parser.error("Workers must be positive.")
     if args.chunk_rows < 0:
-        raise ValueError("Chunk rows must be non-negative.")
+        parser.error("Chunk rows must be non-negative.")
+    if not 0.0 < args.fov < 180.0:
+        parser.error("FOV must be in the range (0, 180).")
+    if args.white_point is not None and args.white_point <= 0.0:
+        parser.error("White point must be positive.")
     return args
 
 
 def main() -> None:
     args = parse_args()
     start_time = time.monotonic()
-    scene = make_scene(args)
-    camera = Camera.look_at(
-        origin=Vec3(*args.camera),
-        target=Vec3(*args.look_at),
-        fov_degrees=args.fov,
-        aspect=args.width / args.height,
-    )
+    try:
+        scene = make_scene(args)
+        camera = Camera.look_at(
+            origin=Vec3(*args.camera),
+            target=Vec3(*args.look_at),
+            fov_degrees=args.fov,
+            aspect=args.width / args.height,
+        )
+    except ValueError as error:
+        raise SystemExit(f"error: {error}") from error
 
     print(
         f"scene={args.scene}, triangles={len(scene.triangles)}, lights={len(scene.light_ids)}, "
