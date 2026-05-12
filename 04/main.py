@@ -255,6 +255,14 @@ class NativeHitResult(ctypes.Structure):
     ]
 
 
+REQUIRED_NATIVE_SYMBOLS = (
+    "intersect_triangles",
+    "is_occluded_triangles",
+    "intersect_bvh_triangles",
+    "is_occluded_bvh_triangles",
+)
+
+
 def add_windows_dll_dirs() -> None:
     if sys.platform != "win32":
         return
@@ -283,6 +291,15 @@ def load_native_library() -> ctypes.CDLL | None:
         try:
             library = ctypes.CDLL(str(library_path))
         except OSError:
+            continue
+
+        missing_symbols = [name for name in REQUIRED_NATIVE_SYMBOLS if not hasattr(library, name)]
+        if missing_symbols:
+            print(
+                f"warning: skipping {library_path.name}: missing symbols {', '.join(missing_symbols)}; "
+                "rebuild it with python 04/build_native.py",
+                file=sys.stderr,
+            )
             continue
 
         double_ptr = ctypes.POINTER(ctypes.c_double)
