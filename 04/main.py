@@ -13,6 +13,16 @@ import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Optional numpy for fast post-processing (build_display_bytes).
+# If numpy is not installed the pure-Python fallback is used automatically.
+# ---------------------------------------------------------------------------
+try:
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:
+    _NUMPY_AVAILABLE = False
+
 
 EPSILON = 1e-6
 GAMMA = 2.2
@@ -91,6 +101,19 @@ ONE = Vec3(1.0, 1.0, 1.0)
 class Ray:
     origin: Vec3
     direction: Vec3
+    # Precomputed reciprocal direction for fast AABB slab tests.
+    # Stored as a plain tuple to avoid Vec3 overhead in the hot path.
+    inv_dir: tuple[float, float, float] = field(init=False)
+
+    def __post_init__(self) -> None:
+        def safe_inv(v: float) -> float:
+            return 1.0 / v if abs(v) > 1e-30 else (1e30 if v >= 0 else -1e30)
+
+        object.__setattr__(
+            self,
+            "inv_dir",
+            (safe_inv(self.direction.x), safe_inv(self.direction.y), safe_inv(self.direction.z)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,32 +165,34 @@ class AABB:
     def extent(self) -> Vec3:
         return self.maximum - self.minimum
 
+    def surface_area(self) -> float:
+        """Half surface area – used by SAH cost function."""
+        e = self.extent()
+        return 2.0 * (e.x * e.y + e.y * e.z + e.z * e.x)
+
     def intersects(self, ray: Ray, max_distance: float) -> bool:
-        t_min = 0.0
-        t_max = max_distance
+        # Use precomputed reciprocal direction stored in the Ray.
+        idx, idy, idz = ray.inv_dir
+        ox, oy, oz = ray.origin.x, ray.origin.y, ray.origin.z
 
-        for origin, direction, slab_min, slab_max in (
-            (ray.origin.x, ray.direction.x, self.minimum.x, self.maximum.x),
-            (ray.origin.y, ray.direction.y, self.minimum.y, self.maximum.y),
-            (ray.origin.z, ray.direction.z, self.minimum.z, self.maximum.z),
-        ):
-            if abs(direction) < EPSILON:
-                if origin < slab_min or origin > slab_max:
-                    return False
-                continue
+        t0x = (self.minimum.x - ox) * idx
+        t1x = (self.maximum.x - ox) * idx
+        if t0x > t1x:
+            t0x, t1x = t1x, t0x
 
-            inv_direction = 1.0 / direction
-            t0 = (slab_min - origin) * inv_direction
-            t1 = (slab_max - origin) * inv_direction
-            if t0 > t1:
-                t0, t1 = t1, t0
+        t0y = (self.minimum.y - oy) * idy
+        t1y = (self.maximum.y - oy) * idy
+        if t0y > t1y:
+            t0y, t1y = t1y, t0y
 
-            t_min = max(t_min, t0)
-            t_max = min(t_max, t1)
-            if t_max < t_min:
-                return False
+        t0z = (self.minimum.z - oz) * idz
+        t1z = (self.maximum.z - oz) * idz
+        if t0z > t1z:
+            t0z, t1z = t1z, t0z
 
-        return t_max > EPSILON
+        t_enter = max(t0x, t0y, t0z)
+        t_exit = min(t1x, t1y, t1z, max_distance)
+        return t_exit > t_enter and t_exit > EPSILON
 
 
 @dataclass(slots=True)
@@ -226,8 +251,16 @@ class NativeHitResult(ctypes.Structure):
     _fields_ = [
         ("hit", ctypes.c_int),
         ("triangle_id", ctypes.c_int),
-        ("distance", ctypes.c_double),
+        ("distance", ctypes.c_float),   # C side now uses float
     ]
+
+
+REQUIRED_NATIVE_SYMBOLS = (
+    "intersect_triangles",
+    "is_occluded_triangles",
+    "intersect_bvh_triangles",
+    "is_occluded_bvh_triangles",
+)
 
 
 def add_windows_dll_dirs() -> None:
@@ -260,34 +293,55 @@ def load_native_library() -> ctypes.CDLL | None:
         except OSError:
             continue
 
+        missing_symbols = [name for name in REQUIRED_NATIVE_SYMBOLS if not hasattr(library, name)]
+        if missing_symbols:
+            print(
+                f"warning: skipping {library_path.name}: missing symbols {', '.join(missing_symbols)}; "
+                "rebuild it with python 04/build_native.py",
+                file=sys.stderr,
+            )
+            continue
+
         double_ptr = ctypes.POINTER(ctypes.c_double)
+        float_ptr = ctypes.POINTER(ctypes.c_float)
+        int32_ptr = ctypes.POINTER(ctypes.c_int32)
+
+        # --- flat triangle list API (original, kept for small scenes) ---
         library.intersect_triangles.argtypes = [
-            double_ptr,
-            ctypes.c_int,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
+            double_ptr, ctypes.c_int,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double,
         ]
         library.intersect_triangles.restype = NativeHitResult
+
         library.is_occluded_triangles.argtypes = [
-            double_ptr,
-            ctypes.c_int,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_int,
+            double_ptr, ctypes.c_int,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double, ctypes.c_int,
         ]
         library.is_occluded_triangles.restype = ctypes.c_int
+
+        # --- BVH flat-array API (new, for large scenes) ---
+        library.intersect_bvh_triangles.argtypes = [
+            float_ptr, int32_ptr, ctypes.c_int,
+            double_ptr, ctypes.c_int,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double,
+        ]
+        library.intersect_bvh_triangles.restype = NativeHitResult
+
+        library.is_occluded_bvh_triangles.argtypes = [
+            float_ptr, int32_ptr, ctypes.c_int,
+            double_ptr, ctypes.c_int,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_double, ctypes.c_double, ctypes.c_int,
+        ]
+        library.is_occluded_bvh_triangles.restype = ctypes.c_int
+
         return library
 
     return None
@@ -297,20 +351,16 @@ NATIVE_LIBRARY = load_native_library()
 
 
 class NativeIntersector:
+    """Wraps the flat-triangle C functions for small scenes (<=NATIVE_FLAT_TRIANGLE_LIMIT)."""
+
     def __init__(self, triangles: list[Triangle]) -> None:
         values: list[float] = []
         for triangle in triangles:
             values.extend(
                 (
-                    triangle.v0.x,
-                    triangle.v0.y,
-                    triangle.v0.z,
-                    triangle.edge1.x,
-                    triangle.edge1.y,
-                    triangle.edge1.z,
-                    triangle.edge2.x,
-                    triangle.edge2.y,
-                    triangle.edge2.z,
+                    triangle.v0.x, triangle.v0.y, triangle.v0.z,
+                    triangle.edge1.x, triangle.edge1.y, triangle.edge1.z,
+                    triangle.edge2.x, triangle.edge2.y, triangle.edge2.z,
                 )
             )
 
@@ -322,16 +372,10 @@ class NativeIntersector:
             return None
 
         result = NATIVE_LIBRARY.intersect_triangles(
-            self._data,
-            self.triangle_count,
-            ray.origin.x,
-            ray.origin.y,
-            ray.origin.z,
-            ray.direction.x,
-            ray.direction.y,
-            ray.direction.z,
-            max_distance,
-            EPSILON,
+            self._data, self.triangle_count,
+            ray.origin.x, ray.origin.y, ray.origin.z,
+            ray.direction.x, ray.direction.y, ray.direction.z,
+            max_distance, EPSILON,
         )
         if not result.hit:
             return None
@@ -343,17 +387,129 @@ class NativeIntersector:
 
         return bool(
             NATIVE_LIBRARY.is_occluded_triangles(
-                self._data,
-                self.triangle_count,
-                ray.origin.x,
-                ray.origin.y,
-                ray.origin.z,
-                ray.direction.x,
-                ray.direction.y,
-                ray.direction.z,
-                max_distance,
-                EPSILON,
-                ignored_triangle_id,
+                self._data, self.triangle_count,
+                ray.origin.x, ray.origin.y, ray.origin.z,
+                ray.direction.x, ray.direction.y, ray.direction.z,
+                max_distance, EPSILON, ignored_triangle_id,
+            )
+        )
+
+
+class NativeBVHIntersector:
+    """
+    Serialises the Python BVH tree into flat C arrays and delegates
+    ray-scene intersection entirely to the C BVH traversal loop.
+
+    This removes the Python BVH stack loop from the hot path for large scenes.
+
+    Node layout (8 floats per node):
+      [0..2] AABB min (x, y, z)
+      [3..5] AABB max (x, y, z)
+      [6]    left child index  (-1 for leaf)
+      [7]    right child index (-1 for leaf)
+
+    bvh_tris (1 int32 per node): triangle index for leaf nodes, -1 otherwise.
+    Multi-triangle leaves are expanded into chains of single-triangle leaf nodes.
+    """
+
+    def __init__(self, bvh_root: "BVHNode | None", triangles: list[Triangle]) -> None:
+        self._valid = False
+        if NATIVE_LIBRARY is None or bvh_root is None:
+            return
+
+        # BFS to assign stable indices to every node.
+        ordered: list[BVHNode] = []
+        index_map: dict[int, int] = {}
+        queue: list[BVHNode] = [bvh_root]
+        while queue:
+            node = queue.pop(0)
+            index_map[id(node)] = len(ordered)
+            ordered.append(node)
+            if node.left is not None:
+                queue.append(node.left)
+            if node.right is not None:
+                queue.append(node.right)
+
+        # Build flat arrays; multi-triangle leaves are expanded inline.
+        nodes_flat: list[float] = []
+        tris_flat: list[int] = []
+
+        for node in ordered:
+            left_idx = index_map[id(node.left)] if node.left is not None else -1
+            right_idx = index_map[id(node.right)] if node.right is not None else -1
+
+            if node.is_leaf() and len(node.triangle_ids) > 1:
+                # First triangle goes into this node (leaf: left=right=-1).
+                nodes_flat.extend([
+                    node.bounds.minimum.x, node.bounds.minimum.y, node.bounds.minimum.z,
+                    node.bounds.maximum.x, node.bounds.maximum.y, node.bounds.maximum.z,
+                    -1.0, -1.0,
+                ])
+                tris_flat.append(node.triangle_ids[0])
+
+                # Extra triangles become additional leaf nodes chained via
+                # the right-child pointer of the previous node.
+                prev_node_flat_idx = len(tris_flat) - 1
+                for extra_tri in node.triangle_ids[1:]:
+                    new_flat_idx = len(tris_flat)
+                    # Patch right-child of previous node.
+                    nodes_flat[(prev_node_flat_idx) * 8 + 7] = float(new_flat_idx)
+                    nodes_flat.extend([
+                        node.bounds.minimum.x, node.bounds.minimum.y, node.bounds.minimum.z,
+                        node.bounds.maximum.x, node.bounds.maximum.y, node.bounds.maximum.z,
+                        -1.0, -1.0,
+                    ])
+                    tris_flat.append(extra_tri)
+                    prev_node_flat_idx = new_flat_idx
+            else:
+                nodes_flat.extend([
+                    node.bounds.minimum.x, node.bounds.minimum.y, node.bounds.minimum.z,
+                    node.bounds.maximum.x, node.bounds.maximum.y, node.bounds.maximum.z,
+                    float(left_idx), float(right_idx),
+                ])
+                tris_flat.append(node.triangle_ids[0] if node.is_leaf() else -1)
+
+        node_count = len(tris_flat)
+        self._node_count = node_count
+        self._bvh_nodes = (ctypes.c_float * len(nodes_flat))(*nodes_flat)
+        self._bvh_tris = (ctypes.c_int32 * len(tris_flat))(*tris_flat)
+
+        # Flat double array of triangle data.
+        tri_values: list[float] = []
+        for triangle in triangles:
+            tri_values.extend([
+                triangle.v0.x, triangle.v0.y, triangle.v0.z,
+                triangle.edge1.x, triangle.edge1.y, triangle.edge1.z,
+                triangle.edge2.x, triangle.edge2.y, triangle.edge2.z,
+            ])
+        self._tri_data = (ctypes.c_double * len(tri_values))(*tri_values)
+        self._triangle_count = len(triangles)
+        self._valid = True
+
+    @property
+    def valid(self) -> bool:
+        return self._valid
+
+    def intersect(self, ray: Ray, max_distance: float) -> tuple[int, float] | None:
+        result = NATIVE_LIBRARY.intersect_bvh_triangles(  # type: ignore[union-attr]
+            self._bvh_nodes, self._bvh_tris, self._node_count,
+            self._tri_data, self._triangle_count,
+            ray.origin.x, ray.origin.y, ray.origin.z,
+            ray.direction.x, ray.direction.y, ray.direction.z,
+            max_distance, EPSILON,
+        )
+        if not result.hit:
+            return None
+        return result.triangle_id, result.distance
+
+    def is_occluded(self, ray: Ray, max_distance: float, ignored_triangle_id: int) -> bool:
+        return bool(
+            NATIVE_LIBRARY.is_occluded_bvh_triangles(  # type: ignore[union-attr]
+                self._bvh_nodes, self._bvh_tris, self._node_count,
+                self._tri_data, self._triangle_count,
+                ray.origin.x, ray.origin.y, ray.origin.z,
+                ray.direction.x, ray.direction.y, ray.direction.z,
+                max_distance, EPSILON, ignored_triangle_id,
             )
         )
 
@@ -370,6 +526,90 @@ class BVHNode:
 
 
 BVH_LEAF_SIZE = 4
+# Number of SAH candidate split bins per axis.
+SAH_BINS = 8
+
+
+def _sah_split(
+    triangles: list[Triangle],
+    triangle_ids: list[int],
+    bounds: AABB,
+) -> tuple[str, float] | None:
+    """
+    Surface Area Heuristic split.
+
+    Returns (axis_name, split_position) for the best split found, or None
+    if no split is better than keeping all triangles in one leaf.
+
+    Cost model:
+        cost = C_TRAV + (SA_left * N_left + SA_right * N_right) / SA_parent
+    where C_TRAV = 1.0 (relative to per-triangle intersection cost = 1).
+    """
+    C_TRAV = 1.0
+    parent_sa = bounds.surface_area()
+    if parent_sa < 1e-30:
+        return None
+
+    best_cost = float("inf")
+    best_axis: str | None = None
+    best_split: float = 0.0
+
+    for axis in ("x", "y", "z"):
+        axis_min = getattr(bounds.minimum, axis)
+        axis_max = getattr(bounds.maximum, axis)
+        if axis_max - axis_min < EPSILON:
+            continue
+
+        bin_bounds: list[AABB] = [AABB.empty() for _ in range(SAH_BINS)]
+        bin_counts: list[int] = [0] * SAH_BINS
+
+        inv_range = SAH_BINS / (axis_max - axis_min)
+        for tid in triangle_ids:
+            c = getattr(triangles[tid].centroid, axis)
+            b = int((c - axis_min) * inv_range)
+            b = min(b, SAH_BINS - 1)
+            bin_bounds[b] = bin_bounds[b].union(triangles[tid].bounds)
+            bin_counts[b] += 1
+
+        # Prefix sweep left→right.
+        left_sa = [0.0] * SAH_BINS
+        left_n = [0] * SAH_BINS
+        acc_bounds = AABB.empty()
+        acc_n = 0
+        for i in range(SAH_BINS - 1):
+            acc_bounds = acc_bounds.union(bin_bounds[i])
+            acc_n += bin_counts[i]
+            left_sa[i] = acc_bounds.surface_area()
+            left_n[i] = acc_n
+
+        # Suffix sweep right→left.
+        right_sa = [0.0] * SAH_BINS
+        right_n = [0] * SAH_BINS
+        acc_bounds = AABB.empty()
+        acc_n = 0
+        for i in range(SAH_BINS - 1, 0, -1):
+            acc_bounds = acc_bounds.union(bin_bounds[i])
+            acc_n += bin_counts[i]
+            right_sa[i] = acc_bounds.surface_area()
+            right_n[i] = acc_n
+
+        for i in range(SAH_BINS - 1):
+            if left_n[i] == 0 or right_n[i + 1] == 0:
+                continue
+            cost = C_TRAV + (left_sa[i] * left_n[i] + right_sa[i + 1] * right_n[i + 1]) / parent_sa
+            if cost < best_cost:
+                best_cost = cost
+                best_axis = axis
+                best_split = axis_min + (i + 1) / SAH_BINS * (axis_max - axis_min)
+
+    if best_axis is None:
+        return None
+
+    # Only split if SAH cost is better than a flat leaf.
+    if best_cost >= float(len(triangle_ids)):
+        return None
+
+    return best_axis, best_split
 
 
 def build_bvh(triangles: list[Triangle], triangle_ids: list[int]) -> BVHNode | None:
@@ -377,12 +617,24 @@ def build_bvh(triangles: list[Triangle], triangle_ids: list[int]) -> BVHNode | N
         return None
 
     bounds = AABB.empty()
-    for triangle_id in triangle_ids:
-        bounds = bounds.union(triangles[triangle_id].bounds)
+    for tid in triangle_ids:
+        bounds = bounds.union(triangles[tid].bounds)
 
     if len(triangle_ids) <= BVH_LEAF_SIZE:
         return BVHNode(bounds=bounds, triangle_ids=tuple(triangle_ids))
 
+    # Try SAH split first.
+    sah_result = _sah_split(triangles, triangle_ids, bounds)
+    if sah_result is not None:
+        axis, split_pos = sah_result
+        left_ids = [tid for tid in triangle_ids if getattr(triangles[tid].centroid, axis) < split_pos]
+        right_ids = [tid for tid in triangle_ids if getattr(triangles[tid].centroid, axis) >= split_pos]
+        if left_ids and right_ids:
+            left = build_bvh(triangles, left_ids)
+            right = build_bvh(triangles, right_ids)
+            return BVHNode(bounds=bounds, left=left, right=right)
+
+    # Fallback: median split on the longest axis.
     extent = bounds.extent()
     if extent.x >= extent.y and extent.x >= extent.z:
         axis = "x"
@@ -391,7 +643,7 @@ def build_bvh(triangles: list[Triangle], triangle_ids: list[int]) -> BVHNode | N
     else:
         axis = "z"
 
-    sorted_ids = sorted(triangle_ids, key=lambda triangle_id: getattr(triangles[triangle_id].centroid, axis))
+    sorted_ids = sorted(triangle_ids, key=lambda tid: getattr(triangles[tid].centroid, axis))
     split = len(sorted_ids) // 2
     if split <= 0 or split >= len(sorted_ids):
         return BVHNode(bounds=bounds, triangle_ids=tuple(sorted_ids))
@@ -416,8 +668,9 @@ class Scene:
     light_power: float = 0.0
     bvh: BVHNode | None = field(init=False, default=None)
     native_intersector: NativeIntersector | None = field(init=False, default=None)
+    native_bvh_intersector: NativeBVHIntersector | None = field(init=False, default=None)
 
-    def __getstate__(self) -> tuple[list[Material], list[Triangle], list[int], list[float], float, BVHNode | None]:
+    def __getstate__(self) -> tuple:
         return (
             self.materials,
             self.triangles,
@@ -427,10 +680,7 @@ class Scene:
             self.bvh,
         )
 
-    def __setstate__(
-        self,
-        state: tuple[list[Material], list[Triangle], list[int], list[float], float, BVHNode | None],
-    ) -> None:
+    def __setstate__(self, state: tuple) -> None:
         (
             self.materials,
             self.triangles,
@@ -440,6 +690,7 @@ class Scene:
             self.bvh,
         ) = state
         self.native_intersector = None
+        self.native_bvh_intersector = None
         self.rebuild_native_intersector()
 
     def rebuild_lights(self) -> None:
@@ -449,7 +700,6 @@ class Scene:
             emission = self.materials[triangle.material_id].emission
             if emission.max_component() <= 0.0:
                 continue
-            # For a Lambertian triangle source, total power is proportional to pi * area * radiance.
             power = math.pi * triangle.area * emission.luminance()
             if power > 0.0:
                 self.light_ids.append(triangle_id)
@@ -470,14 +720,36 @@ class Scene:
         self.bvh = build_bvh(self.triangles, list(range(len(self.triangles))))
 
     def rebuild_native_intersector(self) -> None:
-        if NATIVE_LIBRARY is None or len(self.triangles) > NATIVE_FLAT_TRIANGLE_LIMIT:
+        if NATIVE_LIBRARY is None:
             self.native_intersector = None
+            self.native_bvh_intersector = None
             return
-        self.native_intersector = NativeIntersector(self.triangles)
+
+        if len(self.triangles) <= NATIVE_FLAT_TRIANGLE_LIMIT:
+            # Small scene: use flat C scan (no BVH overhead).
+            self.native_intersector = NativeIntersector(self.triangles)
+            self.native_bvh_intersector = None
+        else:
+            # Large scene: serialise BVH into C flat arrays.
+            self.native_intersector = None
+            nbvh = NativeBVHIntersector(self.bvh, self.triangles)
+            self.native_bvh_intersector = nbvh if nbvh.valid else None
 
     def intersect(self, ray: Ray, max_distance: float = float("inf")) -> Hit | None:
+        # Priority: flat-C (small scene) > C-BVH (large scene) > Python BVH > brute force.
         if self.native_intersector is not None:
             native_hit = self.native_intersector.intersect(ray, max_distance)
+            if native_hit is None:
+                return None
+            triangle_id, distance = native_hit
+            return Hit(
+                distance=distance,
+                point=ray.origin + ray.direction * distance,
+                triangle_id=triangle_id,
+            )
+
+        if self.native_bvh_intersector is not None:
+            native_hit = self.native_bvh_intersector.intersect(ray, max_distance)
             if native_hit is None:
                 return None
             triangle_id, distance = native_hit
@@ -492,13 +764,11 @@ class Scene:
 
         best_distance = max_distance
         best_triangle_id = -1
-
         for triangle_id, triangle in enumerate(self.triangles):
             distance = intersect_triangle(ray, triangle, best_distance)
             if distance is not None and distance < best_distance:
                 best_distance = distance
                 best_triangle_id = triangle_id
-
         if best_triangle_id < 0:
             return None
         return Hit(
@@ -510,10 +780,10 @@ class Scene:
     def is_occluded(self, ray: Ray, max_distance: float, ignored_triangle_id: int) -> bool:
         if self.native_intersector is not None:
             return self.native_intersector.is_occluded(ray, max_distance, ignored_triangle_id)
-
+        if self.native_bvh_intersector is not None:
+            return self.native_bvh_intersector.is_occluded(ray, max_distance, ignored_triangle_id)
         if self.bvh is not None:
             return self._is_occluded_bvh(ray, max_distance, ignored_triangle_id)
-
         for triangle_id, triangle in enumerate(self.triangles):
             if triangle_id == ignored_triangle_id:
                 continue
@@ -524,16 +794,13 @@ class Scene:
     def _intersect_bvh(self, ray: Ray, max_distance: float) -> Hit | None:
         if self.bvh is None:
             return None
-
         best_distance = max_distance
         best_triangle_id = -1
         stack = [self.bvh]
-
         while stack:
             node = stack.pop()
             if not node.bounds.intersects(ray, best_distance):
                 continue
-
             if node.is_leaf():
                 for triangle_id in node.triangle_ids:
                     distance = intersect_triangle(ray, self.triangles[triangle_id], best_distance)
@@ -541,12 +808,10 @@ class Scene:
                         best_distance = distance
                         best_triangle_id = triangle_id
                 continue
-
             if node.left is not None:
                 stack.append(node.left)
             if node.right is not None:
                 stack.append(node.right)
-
         if best_triangle_id < 0:
             return None
         return Hit(
@@ -558,13 +823,11 @@ class Scene:
     def _is_occluded_bvh(self, ray: Ray, max_distance: float, ignored_triangle_id: int) -> bool:
         if self.bvh is None:
             return False
-
         stack = [self.bvh]
         while stack:
             node = stack.pop()
             if not node.bounds.intersects(ray, max_distance):
                 continue
-
             if node.is_leaf():
                 for triangle_id in node.triangle_ids:
                     if triangle_id == ignored_triangle_id:
@@ -572,12 +835,10 @@ class Scene:
                     if intersect_triangle(ray, self.triangles[triangle_id], max_distance) is not None:
                         return True
                 continue
-
             if node.left is not None:
                 stack.append(node.left)
             if node.right is not None:
                 stack.append(node.right)
-
         return False
 
     def sample_light(self, rng: random.Random) -> tuple[int, float]:
@@ -633,18 +894,15 @@ def intersect_triangle(ray: Ray, triangle: Triangle, max_distance: float) -> flo
     determinant = edge1.dot(pvec)
     if abs(determinant) < EPSILON:
         return None
-
     inv_det = 1.0 / determinant
     tvec = ray.origin - triangle.v0
     u = tvec.dot(pvec) * inv_det
     if u < 0.0 or u > 1.0:
         return None
-
     qvec = tvec.cross(edge1)
     v = ray.direction.dot(qvec) * inv_det
     if v < 0.0 or u + v > 1.0:
         return None
-
     distance = edge2.dot(qvec) * inv_det
     if distance <= EPSILON or distance >= max_distance:
         return None
@@ -682,28 +940,23 @@ def offset_ray_origin(point: Vec3, normal: Vec3, direction: Vec3) -> Vec3:
 def estimate_direct_light(point: Vec3, normal: Vec3, material: Material, scene: Scene, rng: random.Random) -> Vec3:
     if material.diffuse.is_black() or not scene.light_ids:
         return BLACK
-
     light_id, select_pdf = scene.sample_light(rng)
     light_triangle = scene.triangles[light_id]
     light_material = scene.materials[light_triangle.material_id]
     light_point = light_triangle.sample_point(rng)
-
     to_light = light_point - point
     distance_squared = to_light.dot(to_light)
     if distance_squared < EPSILON:
         return BLACK
-
     distance = math.sqrt(distance_squared)
     wi = to_light / distance
     surface_cosine = max(0.0, normal.dot(wi))
     light_cosine = max(0.0, light_triangle.normal.dot(-wi))
     if surface_cosine <= 0.0 or light_cosine <= 0.0:
         return BLACK
-
     shadow_ray = Ray(offset_ray_origin(point, normal, wi), wi)
     if scene.is_occluded(shadow_ray, distance - EPSILON * 16.0, light_id):
         return BLACK
-
     pdf_area = select_pdf / light_triangle.area
     brdf = material.diffuse * (1.0 / math.pi)
     geometry = surface_cosine * light_cosine / distance_squared
@@ -767,10 +1020,7 @@ def trace_path(ray: Ray, scene: Scene, rng: random.Random, max_depth: int, rr_de
 
 def add_quad(
     triangles: list[Triangle],
-    v0: Vec3,
-    v1: Vec3,
-    v2: Vec3,
-    v3: Vec3,
+    v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3,
     material_id: int,
 ) -> None:
     triangles.append(Triangle(v0, v1, v2, material_id))
@@ -795,7 +1045,6 @@ def add_ceiling_with_light_slot(
 def add_box(triangles: list[Triangle], p_min: Vec3, p_max: Vec3, material_id: int) -> None:
     xmin, ymin, zmin = p_min.x, p_min.y, p_min.z
     xmax, ymax, zmax = p_max.x, p_max.y, p_max.z
-
     add_quad(triangles, Vec3(xmin, ymin, zmax), Vec3(xmax, ymin, zmax), Vec3(xmax, ymax, zmax), Vec3(xmin, ymax, zmax), material_id)
     add_quad(triangles, Vec3(xmax, ymin, zmin), Vec3(xmin, ymin, zmin), Vec3(xmin, ymax, zmin), Vec3(xmax, ymax, zmin), material_id)
     add_quad(triangles, Vec3(xmin, ymin, zmin), Vec3(xmin, ymin, zmax), Vec3(xmin, ymax, zmax), Vec3(xmin, ymax, zmin), material_id)
@@ -867,7 +1116,6 @@ def make_scene(args: argparse.Namespace) -> Scene:
         box_specular = Vec3(0.86, 0.86, 0.86)
     else:
         object_specular = Vec3(0.25, 0.25, 0.25)
-        # Keep the box glossy, but with enough diffuse energy to read as a solid object.
         box_diffuse = Vec3(0.30, 0.30, 0.34)
         box_specular = Vec3(0.20, 0.20, 0.20)
 
@@ -889,7 +1137,6 @@ def make_scene(args: argparse.Namespace) -> Scene:
     add_quad(triangles, Vec3(-1.0, 0.0, -1.0), Vec3(1.0, 0.0, -1.0), Vec3(1.0, 2.0, -1.0), Vec3(-1.0, 2.0, -1.0), white)
     add_quad(triangles, Vec3(-1.0, 0.0, 1.0), Vec3(-1.0, 0.0, -1.0), Vec3(-1.0, 2.0, -1.0), Vec3(-1.0, 2.0, 1.0), red)
     add_quad(triangles, Vec3(1.0, 0.0, -1.0), Vec3(1.0, 0.0, 1.0), Vec3(1.0, 2.0, 1.0), Vec3(1.0, 2.0, -1.0), green)
-
     add_quad(triangles, Vec3(-0.35, 2.0, -0.35), Vec3(0.35, 2.0, -0.35), Vec3(0.35, 2.0, 0.35), Vec3(-0.35, 2.0, 0.35), light)
 
     if args.scene == "cornell":
@@ -988,12 +1235,35 @@ def render(scene: Scene, camera: Camera, args: argparse.Namespace) -> list[Vec3]
 
 
 def build_display_bytes(pixels: list[Vec3], normalization: float) -> bytearray:
+    """
+    Convert linear HDR pixel list to gamma-corrected 8-bit RGB bytes.
+
+    Uses numpy for a ~10-20x speedup over the pure-Python loop when available.
+    Falls back to pure Python if numpy is not installed.
+    """
+    if _NUMPY_AVAILABLE:
+        inv_norm = 1.0 / normalization
+        arr = np.empty((len(pixels), 3), dtype=np.float64)
+        for i, p in enumerate(pixels):
+            arr[i, 0] = p.x
+            arr[i, 1] = p.y
+            arr[i, 2] = p.z
+        arr *= inv_norm
+        np.clip(arr, 0.0, 1.0, out=arr)
+        arr **= (1.0 / GAMMA)
+        arr *= 255.0
+        np.round(arr, out=arr)
+        np.clip(arr, 0, 255, out=arr)
+        return bytearray(arr.astype(np.uint8).tobytes())
+
+    # Pure-Python fallback.
     data = bytearray()
+    inv_norm = 1.0 / normalization
+    gamma_exp = 1.0 / GAMMA
     for pixel in pixels:
-        relative = pixel * (1.0 / normalization)
-        for value in (relative.x, relative.y, relative.z):
-            clamped = max(0.0, min(1.0, value))
-            corrected = clamped ** (1.0 / GAMMA)
+        for value in (pixel.x, pixel.y, pixel.z):
+            clamped = max(0.0, min(1.0, value * inv_norm))
+            corrected = clamped ** gamma_exp
             data.append(int(round(corrected * 255.0)))
     return data
 
@@ -1043,6 +1313,13 @@ def write_stats(path: Path, args: argparse.Namespace, scene: Scene, normalizatio
             f"- {material.name}: diffuse={material.diffuse}, specular={material.specular}, emission={material.emission}"
         )
 
+    if scene.native_bvh_intersector is not None and scene.native_bvh_intersector.valid:
+        intersector_label = "c_bvh"
+    elif scene.native_intersector is not None:
+        intersector_label = "c_flat_scan"
+    else:
+        intersector_label = "python_bvh"
+
     text = "\n".join(
         [
             "Lab 4 path tracing run",
@@ -1054,7 +1331,8 @@ def write_stats(path: Path, args: argparse.Namespace, scene: Scene, normalizatio
             f"triangles: {len(scene.triangles)}",
             f"emissive_triangles: {len(scene.light_ids)}",
             f"bvh_nodes: {count_bvh_nodes(scene.bvh)}",
-            f"native_intersector: {'c_flat_scan' if scene.native_intersector is not None else 'python_bvh'}",
+            f"native_intersector: {intersector_label}",
+            f"numpy_postprocess: {_NUMPY_AVAILABLE}",
             f"normalization_white_point: {normalization:.8g}",
             f"elapsed_seconds: {elapsed:.3f}",
             "",

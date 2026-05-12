@@ -18,6 +18,12 @@ WINDOWS_DLL_DIRS = (
     Path(r"C:\msys64\mingw64\bin"),
     Path(r"C:\mingw64\bin"),
 )
+REQUIRED_NATIVE_SYMBOLS = (
+    "intersect_triangles",
+    "is_occluded_triangles",
+    "intersect_bvh_triangles",
+    "is_occluded_bvh_triangles",
+)
 
 
 def python_is_64bit() -> bool:
@@ -93,6 +99,10 @@ def add_windows_dll_dirs() -> None:
             continue
 
 
+def missing_native_symbols(library: ctypes.CDLL) -> list[str]:
+    return [name for name in REQUIRED_NATIVE_SYMBOLS if not hasattr(library, name)]
+
+
 def main() -> int:
     print("Python:", platform.architecture()[0])
     selection = select_compiler()
@@ -105,52 +115,67 @@ def main() -> int:
         return 1
 
     compiler_kind, compiler, target = selection
-    if compiler_kind == "gcc":
-        command = [compiler, "-O3", "-shared"]
-        if sys.platform != "win32":
-            command.append("-fPIC")
-        command.extend(["-o", str(OUTPUT), str(SOURCE)])
-        print("Compiler:", compiler)
-        if target:
-            print("Target:", target)
-        print("Command:", " ".join(command))
-        result = subprocess.run(command, check=False, capture_output=True, text=True)
-        if result.stdout:
-            print(result.stdout, end="")
-        if result.stderr:
-            print(result.stderr, end="", file=sys.stderr)
-        if result.returncode != 0 and not OUTPUT.exists():
-            print(f"Compiler exited with code {result.returncode}.")
-            return result.returncode
-        if result.returncode != 0:
-            print(f"warning: compiler exited with code {result.returncode}, but output file was created.")
-    else:
-        with tempfile.TemporaryDirectory() as build_dir:
+    with tempfile.TemporaryDirectory() as build_dir:
+        temp_output = Path(build_dir) / OUTPUT.name
+        if compiler_kind == "gcc":
+            command = [compiler, "-O3", "-shared"]
+            if sys.platform != "win32":
+                command.append("-fPIC")
+            command.extend(["-o", str(temp_output), str(SOURCE)])
+            print("Compiler:", compiler)
+            if target:
+                print("Target:", target)
+            print("Command:", " ".join(command))
+            result = subprocess.run(command, check=False, capture_output=True, text=True)
+            if result.stdout:
+                print(result.stdout, end="")
+            if result.stderr:
+                print(result.stderr, end="", file=sys.stderr)
+            if result.returncode != 0:
+                print(f"Compiler exited with code {result.returncode}.")
+                return result.returncode
+        else:
             command = [
                 compiler,
                 "/O2",
                 "/LD",
                 str(SOURCE),
                 "/link",
-                f"/OUT:{OUTPUT}",
+                f"/OUT:{temp_output}",
             ]
             print("Compiler:", compiler)
             print("Command:", " ".join(command))
             subprocess.run(command, check=True, cwd=build_dir)
 
-    try:
-        add_windows_dll_dirs()
-        ctypes.CDLL(str(OUTPUT))
-    except OSError as error:
-        print(f"Built {OUTPUT}, but Python could not load it:")
-        print(error)
-        OUTPUT.unlink(missing_ok=True)
-        print(f"Removed incompatible {OUTPUT}")
-        print("Most likely cause on Windows: 32-bit compiler with 64-bit Python.")
-        print("Use a compiler that matches Python architecture and rebuild.")
-        return 1
+        try:
+            add_windows_dll_dirs()
+            built_library = ctypes.CDLL(str(temp_output))
+        except OSError as error:
+            print(f"Built {temp_output}, but Python could not load it:")
+            print(error)
+            print("Most likely cause on Windows: 32-bit compiler with 64-bit Python.")
+            print("Use a compiler that matches Python architecture and rebuild.")
+            return 1
 
-    print(f"Built and loaded {OUTPUT}")
+        missing_symbols = missing_native_symbols(built_library)
+        if missing_symbols:
+            print(
+                f"Built library is missing required symbols: {', '.join(missing_symbols)}."
+            )
+            print("Make sure native_intersect.c matches main.py and rebuild.")
+            return 1
+
+        try:
+            OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+            OUTPUT.unlink(missing_ok=True)
+            shutil.copy2(temp_output, OUTPUT)
+            ctypes.CDLL(str(OUTPUT))
+        except OSError as error:
+            print(f"Built {temp_output}, but could not install {OUTPUT}:")
+            print(error)
+            return 1
+
+    print(f"Built and validated {OUTPUT}")
     return 0
 
 
