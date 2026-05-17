@@ -1,0 +1,28 @@
+Lab 5 bilateral filter run
+input_aov: 05/outputs/aov.npz
+output: 05/outputs/filtered_median.png
+mode: median
+sigma_s: 2.0
+sigma_n: 0.3
+sigma_z: 0.1
+sigma_c: 0.0
+radius: 3
+split_direct_indirect: False
+energy_normalize: object
+image_size: 500x500
+
+reference: 05/outputs/reference.npz
+psnr_noisy_db: 39.14
+psnr_filtered_db: 37.46
+l1_noisy: 0.046560
+l1_filtered: 0.026277
+
+Energy per object (noisy vs filtered):
+  obj_id=0  energy_in=25698.2501  energy_out=25698.2501  ratio=1.0000
+  obj_id=1  energy_in=10640.5759  energy_out=10640.5759  ratio=1.0000
+  obj_id=2  energy_in=57956.8623  energy_out=57956.8623  ratio=1.0000
+  obj_id=3  energy_in=12988.7943  energy_out=12988.7943  ratio=1.0000
+  obj_id=4  energy_in=16426.9857  energy_out=16426.9857  ratio=1.0000
+  obj_id=5  energy_in=151273.8301  energy_out=151273.8325  ratio=1.0000
+  obj_id=6  energy_in=3531.6413  energy_out=3531.6413  ratio=1.0000
+  obj_id=7  energy_in=2793.5925  energy_out=2793.5925  ratio=1.0000

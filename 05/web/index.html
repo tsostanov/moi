@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bilateral Denoiser · Lab 5</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+
+<style>
+/* ══════════════════════════════════════════════════
+   Design tokens — warm editorial palette
+   ══════════════════════════════════════════════════ */
+:root {
+  /* Base */
+  --bg:          #FDFAF6;
+  --surface:     #FFFFFF;
+  --surface-2:   #F4EFE8;
+  --surface-3:   #EDE7DF;
+  --border:      #DDD5CB;
+  --border-2:    #EDE7DF;
+
+  /* Text */
+  --text:        #1A1714;
+  --text-2:      #4A4440;
+  --text-muted:  #7A706A;
+
+  /* Accent — terra cotta */
+  --accent:      #BF5538;
+  --accent-dim:  #CA6647;
+  --accent-bg:   #F6E9E3;
+  --accent-bd:   #E8C5B5;
+
+  /* Purple — soft plum */
+  --plum:        #6852A0;
+  --plum-bg:     #EDEAF7;
+  --plum-bd:     #CAC0E8;
+
+  /* Green — sage */
+  --sage:        #3D7E6C;
+  --sage-bg:     #E3F0EB;
+  --sage-bd:     #B4D8CC;
+
+  /* Amber */
+  --amber:       #C48C25;
+  --amber-bg:    #FAF0D4;
+
+  /* Radii */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r:    12px;
+  --r-lg: 18px;
+
+  /* Shadows */
+  --sh-xs: 0 1px 2px rgba(0,0,0,.06);
+  --sh-sm: 0 1px 4px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04);
+  --sh:    0 3px 10px rgba(0,0,0,.1), 0 0 0 1px rgba(0,0,0,.04);
+  --sh-lg: 0 8px 28px rgba(0,0,0,.12), 0 0 0 1px rgba(0,0,0,.05);
+
+  /* Fonts */
+  --f-display: 'Fraunces', Georgia, serif;
+  --f-body:    'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --f-mono:    'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+
+  --ease: cubic-bezier(.4,0,.2,1);
+  --dur: 180ms;
+}
+
+/* ══════════════════════════════════════════════════
+   Reset
+   ══════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 15px; -webkit-font-smoothing: antialiased; }
+
+body {
+  font-family: var(--f-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+button { font-family: var(--f-body); cursor: pointer; }
+img { display: block; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ══════════════════════════════════════════════════
+   Header
+   ══════════════════════════════════════════════════ */
+.header {
+  height: 58px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 22px;
+  background: rgba(255,255,255,.88);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-2);
+  z-index: 50;
+}
+
+.header-mark {
+  width: 34px; height: 34px;
+  background: linear-gradient(135deg, var(--accent) 0%, #D4714E 100%);
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  font-size: 15px;
+  box-shadow: 0 2px 6px rgba(191,85,56,.35);
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-family: var(--f-display);
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: -.02em;
+  color: var(--text);
+}
+
+.header-pill {
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.header-spacer { flex: 1; }
+
+.header-status {
+  display: flex; align-items: center; gap: 7px;
+  font-size: .78rem; color: var(--text-muted);
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--amber);
+  transition: background var(--dur) var(--ease);
+}
+.status-dot.ready { background: var(--sage); }
+
+/* ══════════════════════════════════════════════════
+   App body — 3-column grid
+   ══════════════════════════════════════════════════ */
+.app-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 264px 1fr 296px;
+  overflow: hidden;
+}
+
+/* ══════════════════════════════════════════════════
+   Left sidebar — controls
+   ══════════════════════════════════════════════════ */
+.sidebar {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 14px 14px 16px;
+  border-right: 1px solid var(--border-2);
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r);
+  padding: 14px 14px 12px;
+  margin-bottom: 7px;
+}
+
+.card-title {
+  font-size: .67rem;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 11px;
+}
+
+/* Mode pills */
+.pills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  background: var(--surface-2);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.pill {
+  background: none; border: none;
+  padding: 7px 0;
+  border-radius: 7px;
+  font-size: .83rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: all var(--dur) var(--ease);
+  text-align: center;
+}
+.pill:hover:not(.active) { color: var(--text-2); }
+.pill.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--sh-xs);
+}
+
+/* Slider row */
+.slider-row { margin-bottom: 13px; }
+.slider-row:last-child { margin-bottom: 0; }
+
+.slider-head {
+  display: flex; justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.slider-name {
+  font-size: .8rem; font-weight: 500; color: var(--text-2);
+}
+.slider-val {
+  font-family: var(--f-mono);
+  font-size: .75rem;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+input[type=range] {
+  -webkit-appearance: none;
+  width: 100%; height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2.5px solid #fff;
+  box-shadow: 0 0 0 1.5px var(--accent);
+  transition: transform var(--dur) var(--ease);
+}
+input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+/* Toggles */
+.toggle-row {
+  display: flex; align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-2);
+}
+.toggle-row:last-child { border-bottom: none; padding-bottom: 0; }
+.toggle-label { font-size: .8rem; color: var(--text-2); }
+
+.toggle {
+  position: relative;
+  width: 34px; height: 19px;
+  flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-track {
+  position: absolute; inset: 0;
+  background: var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  left: 2px; top: 2px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--sh-xs);
+  transition: transform var(--dur) var(--ease);
+}
+input:checked + .toggle-track { background: var(--accent); }
+input:checked + .toggle-track::after { transform: translateX(15px); }
+
+/* Run button */
+.run-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 11px;
+  background: var(--accent);
+  color: #fff; border: none;
+  border-radius: var(--r);
+  font-size: .88rem; font-weight: 600;
+  transition: all var(--dur) var(--ease);
+  box-shadow: 0 2px 6px rgba(191,85,56,.3);
+  margin-top: 2px;
+}
+.run-btn:hover { background: var(--accent-dim); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(191,85,56,.35); }
+.run-btn:active { transform: translateY(0); }
+.run-btn.loading { opacity: .8; cursor: wait; pointer-events: none; }
+
+.btn-render {
+  margin-top: 7px;
+  background: none;
+  border: 1.5px solid var(--plum-bd);
+  color: var(--plum);
+  box-shadow: none;
+  font-size: .82rem;
+}
+.btn-render:hover { background: var(--plum-bg); box-shadow: none; }
+
+.spin {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .55s linear infinite;
+  display: none;
+}
+.loading .spin { display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ══════════════════════════════════════════════════
+   Center — image viewer
+   ══════════════════════════════════════════════════ */
+.viewer {
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border-2);
+}
+
+.tabs-bar {
+  display: flex; gap: 0;
+  padding: 0 18px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-2);
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  padding: 14px 16px;
+  background: none; border: none;
+  border-bottom: 2px solid transparent;
+  font-size: .8rem; font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: all var(--dur) var(--ease);
+  white-space: nowrap;
+}
+.tab-btn:hover:not(.active) { color: var(--text-2); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.viewer-body {
+  flex: 1; overflow: hidden;
+  position: relative;
+}
+
+.panel {
+  display: none;
+  width: 100%; height: 100%;
+  align-items: center; justify-content: center;
+}
+.panel.active { display: flex; }
+
+/* ─── Compare slider ─── */
+.compare-scene {
+  position: relative;
+  display: inline-block;
+  cursor: ew-resize;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  box-shadow: var(--sh);
+  max-height: calc(100vh - 140px);
+  user-select: none;
+  --pos: 50%;
+}
+
+.compare-scene img {
+  display: block;
+  max-height: calc(100vh - 140px);
+  width: auto;
+}
+
+.compare-top {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  clip-path: inset(0 calc(100% - var(--pos)) 0 0);
+}
+
+.compare-bar {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: var(--pos);
+  transform: translateX(-50%);
+  width: 2px;
+  background: rgba(255,255,255,.9);
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px rgba(0,0,0,.3));
+}
+.compare-knob {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--sh);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+
+.compare-label {
+  position: absolute; top: 12px;
+  background: rgba(24,20,16,.6);
+  backdrop-filter: blur(4px);
+  color: rgba(255,255,255,.9);
+  font-size: .67rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 20px;
+  pointer-events: none;
+}
+.compare-label.l { left: 14px; }
+.compare-label.r { right: 14px; }
+
+/* ─── Single image view ─── */
+.single-pane {
+  padding: 24px;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  display: flex; align-items: flex-start; justify-content: center;
+}
+.single-pane img {
+  border-radius: var(--r-sm);
+  box-shadow: var(--sh);
+  max-height: calc(100vh - 190px);
+  width: auto;
+}
+
+/* ─── Debug 2×2 grid ─── */
+.debug-pane {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  overflow-y: auto;
+  align-content: start;
+  width: 100%;
+  max-height: calc(100vh - 140px);
+}
+.debug-card {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.debug-card img { width: 100%; display: block; }
+.debug-card-name {
+  padding: 6px 10px;
+  font-size: .7rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-muted);
+}
+
+/* ─── No-data placeholder ─── */
+.no-data {
+  text-align: center;
+  padding: 56px 32px;
+  color: var(--text-muted);
+}
+.no-data-icon { font-size: 2.4rem; margin-bottom: 12px; }
+.no-data h3 {
+  font-family: var(--f-display);
+  font-style: italic;
+  font-size: 1.15rem;
+  font-weight: 300;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+.no-data p { font-size: .82rem; line-height: 1.6; }
+
+/* ══════════════════════════════════════════════════
+   Right panel — metrics
+   ══════════════════════════════════════════════════ */
+.metrics {
+  padding: 16px 14px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.metrics-title {
+  font-family: var(--f-display);
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: -.01em;
+  margin-bottom: 14px;
+}
+
+/* Metric card */
+.mcard {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.mcard-title {
+  font-size: .67rem; font-weight: 600;
+  letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.mrow {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+}
+.mname { font-size: .8rem; color: var(--text-2); }
+.mval {
+  font-family: var(--f-mono);
+  font-size: .83rem; font-weight: 600;
+  color: var(--text);
+  transition: color var(--dur) var(--ease);
+}
+.mval.better { color: var(--sage); }
+.mval.worse  { color: var(--accent); }
+.mval.empty  { color: var(--border); }
+
+/* Improvement badge */
+.improvement-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 10px 14px;
+  background: var(--sage-bg);
+  border: 1px solid var(--sage-bd);
+  border-radius: var(--r);
+  margin-bottom: 8px;
+}
+.improvement-icon { font-size: 1.1rem; }
+.improvement-text { font-size: .82rem; color: var(--sage); font-weight: 500; }
+.improvement-num { font-family: var(--f-mono); font-weight: 700; font-size: .9rem; color: var(--sage); }
+
+/* Energy table */
+.energy-table {
+  width: 100%; border-collapse: collapse;
+  font-size: .77rem;
+}
+.energy-table th {
+  text-align: left; color: var(--text-muted);
+  font-weight: 500; padding: 3px 6px 6px;
+  border-bottom: 1px solid var(--border-2);
+}
+.energy-table td {
+  padding: 4px 6px;
+  font-family: var(--f-mono);
+}
+.obj-swatch {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+/* Log */
+.log-wrap { margin-top: 10px; }
+.log-label {
+  font-size: .67rem; font-weight: 600;
+  letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 6px;
+}
+.log {
+  background: var(--text);
+  color: rgba(255,255,255,.75);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  font-family: var(--f-mono);
+  font-size: .7rem;
+  line-height: 1.8;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 22px; left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  background: var(--text);
+  color: rgba(255,255,255,.9);
+  padding: 10px 22px;
+  border-radius: 40px;
+  font-size: .82rem; font-weight: 500;
+  box-shadow: var(--sh-lg);
+  opacity: 0; pointer-events: none;
+  transition: all 280ms var(--ease);
+  z-index: 999; white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ═══ Header ═══════════════════════════════════════════════ -->
+<header class="header">
+  <div class="header-mark">◈</div>
+  <span class="header-title">Bilateral Denoiser</span>
+  <span class="header-pill">Lab 5 · Path Tracing</span>
+  <div class="header-spacer"></div>
+  <div class="header-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Соединение…</span>
+  </div>
+</header>
+
+<!-- ═══ Body ═════════════════════════════════════════════════ -->
+<div class="app-body">
+
+  <!-- ── Left sidebar ───────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <div class="card">
+      <div class="card-title">Режим фильтра</div>
+      <div class="pills">
+        <button class="pill active" data-mode="mean">Mean</button>
+        <button class="pill" data-mode="median">Median</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Пространство и диапазон</div>
+      <div class="slider-row">
+        <div class="slider-head">
+          <span class="slider-name">σ<sub>s</sub> — пространство</span>
+          <span class="slider-val" id="v-ss">3.0</span>
+        </div>
+        <input type="range" id="s-ss" min="0.5" max="8" step="0.5" value="3">
+      </div>
+      <div class="slider-row">
+        <div class="slider-head">
+          <span class="slider-name">σ<sub>n</sub> — нормаль</span>
+          <span class="slider-val" id="v-sn">0.30</span>
+        </div>
+        <input type="range" id="s-sn" min="0.05" max="2" step="0.05" value="0.3">
+      </div>
+      <div class="slider-row">
+        <div class="slider-head">
+          <span class="slider-name">σ<sub>z</sub> — глубина</span>
+          <span class="slider-val" id="v-sz">0.10</span>
+        </div>
+        <input type="range" id="s-sz" min="0.01" max="1" step="0.01" value="0.1">
+      </div>
+      <div class="slider-row">
+        <div class="slider-head">
+          <span class="slider-name">σ<sub>c</sub> — цвет</span>
+          <span class="slider-val" id="v-sc">0.00</span>
+        </div>
+        <input type="range" id="s-sc" min="0" max="1" step="0.05" value="0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-head">
+          <span class="slider-name">Радиус окна r</span>
+          <span class="slider-val" id="v-r">3</span>
+        </div>
+        <input type="range" id="s-r" min="1" max="7" step="1" value="3">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Опции</div>
+      <div class="toggle-row">
+        <span class="toggle-label">Раздельно direct + indirect</span>
+        <label class="toggle">
+          <input type="checkbox" id="opt-split" checked>
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Нормировка энергии</span>
+        <label class="toggle">
+          <input type="checkbox" id="opt-energy">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
+    <button class="run-btn" id="btn-run">
+      <div class="spin"></div>
+      <span id="btn-run-text">▶ Применить фильтр</span>
+    </button>
+
+    <button class="run-btn btn-render" id="btn-render">
+      <span id="btn-render-text">⊙ Новый рендер (4 spp ~35с)</span>
+    </button>
+
+  </aside>
+
+  <!-- ── Center viewer ──────────────────────────────────────── -->
+  <div class="viewer">
+    <div class="tabs-bar">
+      <button class="tab-btn active" data-panel="compare">Сравнение ←→</button>
+      <button class="tab-btn" data-panel="filtered">Результат</button>
+      <button class="tab-btn" data-panel="diff">Разность</button>
+      <button class="tab-btn" data-panel="debug">AOV-каналы</button>
+    </div>
+
+    <div class="viewer-body">
+
+      <!-- Compare -->
+      <div class="panel active" id="panel-compare">
+        <div class="compare-scene" id="compare-scene">
+          <img id="img-back" src="/api/images/noisy.png" alt="Шумный">
+          <img id="img-front" src="/api/images/filtered_web.png" class="compare-top" alt="Фильтр">
+          <div class="compare-bar" id="compare-bar">
+            <div class="compare-knob">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M7 4l-4 6 4 6M13 4l4 6-4 6"/>
+              </svg>
+            </div>
+          </div>
+          <span class="compare-label l">Шумный</span>
+          <span class="compare-label r">Фильтр</span>
+        </div>
+      </div>
+
+      <!-- Filtered -->
+      <div class="panel" id="panel-filtered">
+        <div class="single-pane">
+          <img id="img-filtered-single" src="/api/images/filtered_web.png" alt="Отфильтрованный">
+        </div>
+      </div>
+
+      <!-- Diff -->
+      <div class="panel" id="panel-diff">
+        <div class="single-pane">
+          <img id="img-diff" src="/api/images/diff.png" alt="Разность">
+        </div>
+      </div>
+
+      <!-- Debug -->
+      <div class="panel" id="panel-debug">
+        <div class="debug-pane">
+          <div class="debug-card">
+            <img src="/api/images/debug_objid.png" alt="Object IDs">
+            <div class="debug-card-name">Object ID</div>
+          </div>
+          <div class="debug-card">
+            <img src="/api/images/debug_normal.png" alt="Normals">
+            <div class="debug-card-name">Нормали</div>
+          </div>
+          <div class="debug-card">
+            <img src="/api/images/debug_depth.png" alt="Depth">
+            <div class="debug-card-name">Глубина</div>
+          </div>
+          <div class="debug-card">
+            <img src="/api/images/noisy.png" alt="Шумный">
+            <div class="debug-card-name">Шумный (4 spp)</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Right metrics ──────────────────────────────────────── -->
+  <div class="metrics">
+    <div class="metrics-title">Метрики</div>
+
+    <!-- Improvement highlight -->
+    <div class="improvement-row" id="improvement-row" style="display:none">
+      <span class="improvement-icon">↓</span>
+      <span class="improvement-text">L1 улучшена на&nbsp;</span>
+      <span class="improvement-num" id="improvement-num">—</span>
+    </div>
+
+    <!-- PSNR -->
+    <div class="mcard">
+      <div class="mcard-title">PSNR vs эталон (32 spp)</div>
+      <div class="mrow">
+        <span class="mname">Шумный (4 spp)</span>
+        <span class="mval empty" id="m-psnr-noisy">— dB</span>
+      </div>
+      <div class="mrow">
+        <span class="mname">Отфильтрованный</span>
+        <span class="mval empty" id="m-psnr-filt">— dB</span>
+      </div>
+    </div>
+
+    <!-- L1 -->
+    <div class="mcard">
+      <div class="mcard-title">L1-ошибка vs эталон</div>
+      <div class="mrow">
+        <span class="mname">Шумный</span>
+        <span class="mval empty" id="m-l1-noisy">—</span>
+      </div>
+      <div class="mrow">
+        <span class="mname">Отфильтрованный</span>
+        <span class="mval empty better" id="m-l1-filt">—</span>
+      </div>
+    </div>
+
+    <!-- Energy conservation -->
+    <div class="mcard">
+      <div class="mcard-title">Энергия по объектам</div>
+      <div id="energy-body" style="font-size:.78rem; color:var(--text-muted); font-style:italic;">
+        Запустите фильтр
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-wrap">
+      <div class="log-label">Консоль</div>
+      <div class="log" id="log">Готов к работе…</div>
+    </div>
+  </div>
+
+</div><!-- /app-body -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════════════
+   Utilities
+   ══════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+
+function toast(msg, ms = 2600) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms);
+}
+
+function bust(url) { return url + '?t=' + Date.now(); }
+
+function reloadImg(id, src) {
+  const el = $(id);
+  if (el) el.src = bust(src);
+}
+
+/* ══════════════════════════════════════════════════
+   Compare slider
+   ══════════════════════════════════════════════════ */
+const scene = $('compare-scene');
+let dragging = false;
+
+function setPos(clientX) {
+  const rect = scene.getBoundingClientRect();
+  const pct = Math.max(2, Math.min(98, (clientX - rect.left) / rect.width * 100));
+  scene.style.setProperty('--pos', pct + '%');
+}
+
+scene.addEventListener('mousedown', e => { dragging = true; setPos(e.clientX); });
+document.addEventListener('mousemove', e => { if (dragging) setPos(e.clientX); });
+document.addEventListener('mouseup', () => { dragging = false; });
+scene.addEventListener('touchstart', e => setPos(e.touches[0].clientX), { passive: true });
+scene.addEventListener('touchmove', e => setPos(e.touches[0].clientX), { passive: true });
+
+/* ══════════════════════════════════════════════════
+   Tabs
+   ══════════════════════════════════════════════════ */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $('panel-' + btn.dataset.panel).classList.add('active');
+  });
+});
+
+/* ══════════════════════════════════════════════════
+   Mode pills
+   ══════════════════════════════════════════════════ */
+let currentMode = 'mean';
+document.querySelectorAll('.pill').forEach(p => {
+  p.addEventListener('click', () => {
+    document.querySelectorAll('.pill').forEach(x => x.classList.remove('active'));
+    p.classList.add('active');
+    currentMode = p.dataset.mode;
+  });
+});
+
+/* ══════════════════════════════════════════════════
+   Sliders
+   ══════════════════════════════════════════════════ */
+function wireSlider(sliderId, valId, decimals) {
+  const sl = $(sliderId), vl = $(valId);
+  const fmt = v => decimals === 0 ? parseInt(v) : parseFloat(v).toFixed(decimals);
+  sl.addEventListener('input', () => { vl.textContent = fmt(sl.value); });
+}
+wireSlider('s-ss', 'v-ss', 1);
+wireSlider('s-sn', 'v-sn', 2);
+wireSlider('s-sz', 'v-sz', 2);
+wireSlider('s-sc', 'v-sc', 2);
+wireSlider('s-r',  'v-r',  0);
+
+/* ══════════════════════════════════════════════════
+   Run filter
+   ══════════════════════════════════════════════════ */
+$('btn-run').addEventListener('click', async () => {
+  const btn = $('btn-run');
+  btn.classList.add('loading');
+  $('btn-run-text').textContent = 'Фильтрация…';
+
+  const params = {
+    mode: currentMode,
+    sigma_s: parseFloat($('s-ss').value),
+    sigma_n: parseFloat($('s-sn').value),
+    sigma_z: parseFloat($('s-sz').value),
+    sigma_c: parseFloat($('s-sc').value),
+    radius: parseInt($('s-r').value),
+    split_direct_indirect: $('opt-split').checked,
+    energy_normalize: $('opt-energy').checked ? 'object' : 'none',
+  };
+
+  try {
+    const res = await fetch('/api/run-filter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      // Reload all images
+      reloadImg('img-back',            '/api/images/noisy.png');
+      reloadImg('img-front',           '/api/images/filtered_web.png');
+      reloadImg('img-filtered-single', '/api/images/filtered_web.png');
+      reloadImg('img-diff',            '/api/images/diff.png');
+
+      if (data.metrics && Object.keys(data.metrics).length) {
+        renderMetrics(data.metrics);
+      }
+      $('log').textContent = data.log;
+      toast('✓ Фильтр применён');
+    } else {
+      toast('✗ Ошибка при фильтрации');
+      $('log').textContent = (data.log || '') + '\n' + (data.error || '');
+    }
+  } catch (e) {
+    toast('✗ Ошибка соединения');
+  } finally {
+    btn.classList.remove('loading');
+    $('btn-run-text').textContent = '▶ Применить фильтр';
+  }
+});
+
+/* ══════════════════════════════════════════════════
+   Render new noisy
+   ══════════════════════════════════════════════════ */
+$('btn-render').addEventListener('click', async () => {
+  const btn = $('btn-render');
+  btn.disabled = true;
+  $('btn-render-text').textContent = '⊙ Рендер (~35с)…';
+
+  try {
+    const res = await fetch('/api/render-noisy', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      reloadImg('img-back', '/api/images/noisy.png');
+      toast('✓ Новый шумный кадр готов');
+    } else {
+      toast('✗ Ошибка рендера');
+    }
+    $('log').textContent = data.log || '';
+  } finally {
+    btn.disabled = false;
+    $('btn-render-text').textContent = '⊙ Новый рендер (4 spp ~35с)';
+  }
+});
+
+/* ══════════════════════════════════════════════════
+   Metrics rendering
+   ══════════════════════════════════════════════════ */
+const OBJ_NAMES   = ['Пол','Потолок','Задн. стена','Красн. стена','Зел. стена','Источник','Куб','Пирамида'];
+const OBJ_SWATCHES = ['#8B7355','#C8B89A','#6B88B8','#C04848','#48A848','#F5D44A','#5A90C8','#C87840'];
+
+function renderMetrics(m) {
+  function setVal(id, txt, cls) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = txt;
+    el.classList.remove('empty','better','worse');
+    if (cls) el.classList.add(cls);
+  }
+
+  if (m.psnr_noisy !== undefined) {
+    setVal('m-psnr-noisy', m.psnr_noisy.toFixed(2) + ' dB');
+    const psnrCls = m.psnr_filtered >= m.psnr_noisy ? 'better' : 'worse';
+    setVal('m-psnr-filt',  m.psnr_filtered.toFixed(2) + ' dB', psnrCls);
+
+    setVal('m-l1-noisy', m.l1_noisy.toFixed(5));
+    setVal('m-l1-filt',  m.l1_filtered.toFixed(5),
+           m.l1_filtered < m.l1_noisy ? 'better' : 'worse');
+
+    const pctBetter = ((m.l1_noisy - m.l1_filtered) / m.l1_noisy * 100);
+    const row = $('improvement-row');
+    if (pctBetter > 0) {
+      row.style.display = 'flex';
+      $('improvement-num').textContent = pctBetter.toFixed(1) + '%';
+    }
+  }
+
+  if (m.energy && m.energy.length) {
+    let html = '<table class="energy-table"><tr><th>Объект</th><th>ratio</th></tr>';
+    m.energy.forEach(e => {
+      const name   = OBJ_NAMES[e.obj_id]   || 'obj_' + e.obj_id;
+      const swatch = OBJ_SWATCHES[e.obj_id] || '#888';
+      const ok = Math.abs(e.ratio - 1.0) < 0.001;
+      html += `<tr>
+        <td><span class="obj-swatch" style="background:${swatch}"></span>${name}</td>
+        <td style="color:${ok ? 'var(--sage)' : 'var(--accent)'}">${e.ratio.toFixed(4)}</td>
+      </tr>`;
+    });
+    html += '</table>';
+    $('energy-body').innerHTML = html;
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   Initial status check
+   ══════════════════════════════════════════════════ */
+async function checkStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const dot = $('status-dot'), txt = $('status-text');
+    if (data.has_aov) {
+      dot.classList.add('ready');
+      txt.textContent = data.has_reference ? 'AOV + эталон готовы' : 'AOV готов';
+    } else {
+      txt.textContent = 'AOV не найден — запустите рендер';
+    }
+  } catch {
+    $('status-text').textContent = 'Ошибка соединения';
+  }
+}
+
+checkStatus();
+</script>
+</body>
+</html>
