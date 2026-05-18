@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -41,6 +42,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/images/"):
+            # Отдаём только PNG из каталога outputs, без доступа к произвольным путям.
             name = path[len("/api/images/"):]
             if "/" in name or "\\" in name or not name.endswith(".png"):
                 self._send(403, "text/plain", b"Forbidden")
@@ -100,7 +102,7 @@ def run_filter(params: dict) -> dict:
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    # Parse metrics from the .txt output
+    # main.py сохраняет рядом текстовый отчёт; отсюда UI читает метрики.
     txt_path = OUTPUTS / "filtered_web.txt"
     metrics: dict = {}
     energy: list = []
@@ -138,28 +140,44 @@ def run_filter(params: dict) -> dict:
 
 
 def render_noisy() -> dict:
+    aov_path = OUTPUTS / "aov.npz"
+    aov_preview = OUTPUTS / "aov.png"
+    noisy_preview = OUTPUTS / "noisy.png"
     cmd = [
         sys.executable, str(LAB5 / "render_aov.py"),
         "--width", "500", "--height", "500",
         "--samples", "4", "--max-depth", "5",
-        "--output", str(OUTPUTS / "aov.npz"),
+        "--output", str(aov_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    return {"success": result.returncode == 0, "log": result.stdout}
+    success = result.returncode == 0
+    error = result.stderr if not success else ""
+
+    if success:
+        # UI использует noisy.png, поэтому после рендера синхронизируем
+        # его со свежим preview, который создал render_aov.py.
+        if aov_preview.exists():
+            shutil.copyfile(aov_preview, noisy_preview)
+        else:
+            success = False
+            error = f"missing preview after render: {aov_preview}"
+
+    return {"success": success, "log": result.stdout, "error": error}
 
 
 def main() -> None:
     OUTPUTS.mkdir(exist_ok=True)
     WEB.mkdir(exist_ok=True)
 
-    # Generate initial filtered image if it doesn't exist yet
+    # При первом запуске UI подготавливаем стартовый filtered_web.png,
+    # если AOV уже существует на диске.
     if not (OUTPUTS / "filtered_web.png").exists() and (OUTPUTS / "aov.npz").exists():
-        print("Generating initial filtered image…", flush=True)
+        print("Generating initial filtered image...", flush=True)
         run_filter({})
 
     server = HTTPServer(("127.0.0.1", PORT), Handler)
     url = f"http://localhost:{PORT}"
-    print(f"\n  ◈  Bilateral Denoiser UI  →  {url}\n")
+    print(f"\n  Bilateral Denoiser UI -> {url}\n")
     Thread(target=lambda: (__import__("time").sleep(0.6), webbrowser.open(url)),
            daemon=True).start()
     try:

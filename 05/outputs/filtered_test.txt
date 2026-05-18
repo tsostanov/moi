@@ -1,0 +1,22 @@
+Lab 5 bilateral filter run
+input_aov: 05\outputs\aov_test.npz
+output: 05\outputs\filtered_test.png
+mode: mean
+sigma_s: 2.0
+sigma_n: 0.3
+sigma_z: 0.1
+sigma_c: 0.0
+radius: 3
+split_direct_indirect: True
+energy_normalize: object
+image_size: 64x64
+
+Energy per object (noisy vs filtered):
+  obj_id=0  energy_in=343.4336  energy_out=343.4336  ratio=1.0000
+  obj_id=1  energy_in=98.7971  energy_out=98.7971  ratio=1.0000
+  obj_id=2  energy_in=806.5503  energy_out=806.5503  ratio=1.0000
+  obj_id=3  energy_in=175.2834  energy_out=175.2834  ratio=1.0000
+  obj_id=4  energy_in=224.6070  energy_out=224.6070  ratio=1.0000
+  obj_id=5  energy_in=2356.0000  energy_out=2356.0000  ratio=1.0000
+  obj_id=6  energy_in=45.4934  energy_out=45.4934  ratio=1.0000
+  obj_id=7  energy_in=37.4394  energy_out=37.4394  ratio=1.0000

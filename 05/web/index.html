@@ -384,14 +384,14 @@ input:checked + .toggle-track::after { transform: translateX(15px); }
   border-radius: var(--r-sm);
   overflow: hidden;
   box-shadow: var(--sh);
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 112px);
   user-select: none;
   --pos: 50%;
 }
 
 .compare-scene img {
   display: block;
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 112px);
   width: auto;
 }
 
@@ -441,15 +441,15 @@ input:checked + .toggle-track::after { transform: translateX(15px); }
 
 /* ─── Single image view ─── */
 .single-pane {
-  padding: 24px;
-  max-height: calc(100vh - 140px);
+  padding: 16px;
+  max-height: calc(100vh - 112px);
   overflow: auto;
   display: flex; align-items: flex-start; justify-content: center;
 }
 .single-pane img {
   border-radius: var(--r-sm);
   box-shadow: var(--sh);
-  max-height: calc(100vh - 190px);
+  max-height: calc(100vh - 144px);
   width: auto;
 }
 
@@ -856,6 +856,33 @@ function reloadImg(id, src) {
   if (el) el.src = bust(src);
 }
 
+const COMPARE_BACK_SRC = '/api/images/noisy.png';
+const COMPARE_FRONT_SRC = '/api/images/filtered_web.png';
+
+function reloadNoisyPreviews() {
+  document.querySelectorAll('img[src*="/api/images/noisy.png"]').forEach(img => {
+    img.src = bust('/api/images/noisy.png');
+  });
+}
+
+function syncCompareScene() {
+  reloadNoisyPreviews();
+  reloadImg('img-back', COMPARE_BACK_SRC);
+  reloadImg('img-front', COMPARE_FRONT_SRC);
+
+  const back = $('img-back');
+  const front = $('img-front');
+  if (back) back.alt = '\u0428\u0443\u043c\u043d\u044b\u0439';
+  if (front) front.alt = '\u0424\u0438\u043b\u044c\u0442\u0440';
+
+  const leftLabel = document.querySelector('.compare-label.l');
+  const rightLabel = document.querySelector('.compare-label.r');
+  if (leftLabel) leftLabel.textContent = '\u0424\u0438\u043b\u044c\u0442\u0440';
+  if (rightLabel) rightLabel.textContent = '\u0428\u0443\u043c\u043d\u044b\u0439';
+}
+
+syncCompareScene();
+
 /* ══════════════════════════════════════════════════
    Compare slider
    ══════════════════════════════════════════════════ */
@@ -941,8 +968,7 @@ $('btn-run').addEventListener('click', async () => {
 
     if (data.success) {
       // Reload all images
-      reloadImg('img-back',            '/api/images/noisy.png');
-      reloadImg('img-front',           '/api/images/filtered_web.png');
+      syncCompareScene();
       reloadImg('img-filtered-single', '/api/images/filtered_web.png');
       reloadImg('img-diff',            '/api/images/diff.png');
 
@@ -975,12 +1001,12 @@ $('btn-render').addEventListener('click', async () => {
     const res = await fetch('/api/render-noisy', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
-      reloadImg('img-back', '/api/images/noisy.png');
+      syncCompareScene();
       toast('✓ Новый шумный кадр готов');
     } else {
       toast('✗ Ошибка рендера');
     }
-    $('log').textContent = data.log || '';
+    $('log').textContent = (data.log || '') + (data.error ? '\n' + data.error : '');
   } finally {
     btn.disabled = false;
     $('btn-render-text').textContent = '⊙ Новый рендер (4 spp ~35с)';

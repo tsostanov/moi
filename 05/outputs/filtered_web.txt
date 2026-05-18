@@ -1,28 +1,28 @@
 Lab 5 bilateral filter run
-input_aov: /Users/meow4-hi/PycharmProjects/moi-timur/05/outputs/aov.npz
-output: /Users/meow4-hi/PycharmProjects/moi-timur/05/outputs/filtered_web.png
-mode: mean
-sigma_s: 2.0
+input_aov: C:\Users\tsostanov\Dev\Projects\itmo\ipt\05\outputs\aov.npz
+output: C:\Users\tsostanov\Dev\Projects\itmo\ipt\05\outputs\filtered_web.png
+mode: median
+sigma_s: 3.0
 sigma_n: 0.3
 sigma_z: 0.1
 sigma_c: 0.0
-radius: 2
+radius: 3
 split_direct_indirect: True
 energy_normalize: none
 image_size: 500x500
 
-reference: /Users/meow4-hi/PycharmProjects/moi-timur/05/outputs/reference.npz
+reference: C:\Users\tsostanov\Dev\Projects\itmo\ipt\05\outputs\reference.npz
 psnr_noisy_db: 39.14
-psnr_filtered_db: 38.90
+psnr_filtered_db: 37.34
 l1_noisy: 0.046560
-l1_filtered: 0.026523
+l1_filtered: 0.025456
 
 Energy per object (noisy vs filtered):
-  obj_id=0  energy_in=25698.2501  energy_out=25719.1479  ratio=1.0008
-  obj_id=1  energy_in=10640.5759  energy_out=10315.9608  ratio=0.9695
-  obj_id=2  energy_in=57956.8623  energy_out=57965.6993  ratio=1.0002
-  obj_id=3  energy_in=12988.7943  energy_out=12986.3576  ratio=0.9998
-  obj_id=4  energy_in=16426.9857  energy_out=16426.3414  ratio=1.0000
-  obj_id=5  energy_in=151273.8301  energy_out=151605.7719  ratio=1.0022
-  obj_id=6  energy_in=3531.6413  energy_out=3527.8332  ratio=0.9989
-  obj_id=7  energy_in=2793.5925  energy_out=2784.0065  ratio=0.9966
+  obj_id=0  energy_in=25698.2501  energy_out=23774.7567  ratio=0.9252
+  obj_id=1  energy_in=10640.5759  energy_out=8110.4846  ratio=0.7622
+  obj_id=2  energy_in=57956.8623  energy_out=54971.6697  ratio=0.9485
+  obj_id=3  energy_in=12988.7943  energy_out=12295.5931  ratio=0.9466
+  obj_id=4  energy_in=16426.9857  energy_out=15348.5449  ratio=0.9343
+  obj_id=5  energy_in=151273.8301  energy_out=152644.0000  ratio=1.0091
+  obj_id=6  energy_in=3531.6413  energy_out=3057.0034  ratio=0.8656
+  obj_id=7  energy_in=2793.5925  energy_out=2275.2370  ratio=0.8144

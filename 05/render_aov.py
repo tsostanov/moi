@@ -44,6 +44,7 @@ OBJ_BOX2 = 7
 
 
 def _add(tris: list[Triangle], ids: list[int], fn, *args, oid: int, **kw) -> None:
+    # Все треугольники, которые добавил helper, получают один и тот же obj_id.
     before = len(tris)
     fn(tris, *args, **kw)
     ids.extend([oid] * (len(tris) - before))
@@ -148,6 +149,7 @@ def trace_path_aov(
         n = tri.normal if front else -tri.normal
 
         if depth == 0:
+            # Для AOV записываем только первое видимое пересечение луча.
             aov_depth = hit.distance
             aov_obj_id = tri_obj_id[hit.triangle_id]
             aov_normal = n
@@ -164,6 +166,8 @@ def trace_path_aov(
         dc = throughput.mul(d)
         radiance = radiance + dc
         if depth == 0:
+            # Прямой свет первого хита сохраняем отдельно,
+            # чтобы потом восстановить indirect как остаток.
             first_direct = dc
 
         dw = max(0.0, mat.diffuse.luminance())
@@ -228,6 +232,8 @@ def render_aov(
                 d_acc = d_acc + d
                 ind_acc = ind_acc + ind
                 if not geom_set and dep < float("inf"):
+                    # Геометрические AOV достаточно взять из первого
+                    # успешного сэмпла данного пикселя.
                     depth_buf[y, x] = dep
                     obj_id_buf[y, x] = oid
                     normal_buf[y, x] = [norm.x, norm.y, norm.z]
@@ -310,6 +316,7 @@ def main() -> None:
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Один NPZ хранит и цвет, и все вспомогательные буферы для фильтра.
     np.savez_compressed(
         str(out),
         direct=direct,

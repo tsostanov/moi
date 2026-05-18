@@ -235,10 +235,10 @@ def main() -> None:
             ref_psnr_filtered = psnr(filtered_f64, ref_color, max_ref)
             ref_l1_filtered = mean_l1(filtered_f64, ref_color)
 
-            print(f"PSNR  noisy→ref : {ref_psnr_noisy:.2f} dB", flush=True)
-            print(f"PSNR  filt→ref  : {ref_psnr_filtered:.2f} dB", flush=True)
-            print(f"L1    noisy→ref : {ref_l1_noisy:.6f}", flush=True)
-            print(f"L1    filt→ref  : {ref_l1_filtered:.6f}", flush=True)
+            print(f"PSNR  noisy->ref : {ref_psnr_noisy:.2f} dB", flush=True)
+            print(f"PSNR  filt->ref  : {ref_psnr_filtered:.2f} dB", flush=True)
+            print(f"L1    noisy->ref : {ref_l1_noisy:.6f}", flush=True)
+            print(f"L1    filt->ref  : {ref_l1_filtered:.6f}", flush=True)
 
     # Energy report per object
     obj_id = aov["obj_id"].astype(np.int32)

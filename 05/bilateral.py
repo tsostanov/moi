@@ -69,6 +69,7 @@ def bilateral_mean(
     kernel_s = make_spatial_kernel(sigma_s, radius)
 
     pad = radius
+    # Паддинг позволяет одинаково обрабатывать центр и границы изображения.
     img_p = np.pad(image, ((pad, pad), (pad, pad), (0, 0)), mode="edge")
     oid_p = np.pad(obj_id, pad, mode="edge")
     nrm_p = np.pad(normal, ((pad, pad), (pad, pad), (0, 0)), mode="edge")
@@ -77,6 +78,8 @@ def bilateral_mean(
     numerator = np.zeros((H, W, 3), dtype=np.float64)
     denominator = np.zeros((H, W), dtype=np.float64)
 
+    # Для каждого смещения внутри окна считаем spatial weight,
+    # а затем домножаем его на object/normal/depth stop.
     for dy in range(-radius, radius + 1):
         for dx in range(-radius, radius + 1):
             qs = kernel_s[dy + radius, dx + radius]
@@ -153,6 +156,7 @@ def bilateral_median(
     nrm_p = np.pad(normal, ((pad, pad), (pad, pad), (0, 0)), mode="edge")
     dep_p = np.pad(depth, pad, mode="edge")
 
+    # Не прошедшие соседи помечаем NaN, чтобы nanmedian их проигнорировал.
     # Collect neighbor values with NaN for excluded pixels
     neighbors = np.full((n_offsets, H, W, 3), np.nan, dtype=np.float64)
 
@@ -185,6 +189,7 @@ def bilateral_median(
             neighbors[k] = vals
             k += 1
 
+    # Если валидных соседей нет совсем, оставляем исходный пиксель.
     # nanmedian over neighbor dimension; background pixels (all-NaN) fall back to original
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", "All-NaN slice encountered")
@@ -264,6 +269,8 @@ def bilateral_filter(
             raise ValueError(f"Unknown mode: {mode!r}")
 
     if split_direct_indirect:
+        # Direct и indirect имеют разный характер шума, поэтому
+        # обычно выгоднее фильтровать их раздельно.
         direct = aov["direct"].astype(np.float64)
         indirect = aov["indirect"].astype(np.float64)
         f_direct = _filter(direct)
